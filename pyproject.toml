@@ -1,0 +1,23 @@
+[project]
+name = "ComfyUI-Model-Bending"
+version = "0.1.0"
+description = "Use model bending to push your model beyond its visuals' limits. These nodes allow you to apply transformations to the intemediate densoising steps during sampling, e.g. add, multiplty, scale, rotate, dilate, erode ..etc.
+readme = "README.md"
+license = {text = "MIT license"}
+classifiers = []
+dependencies = ["kornia"]
+
+[project.urls]
+Repository = "https://github.com/abuzreq/diffusion_bending"
+bugs = "https://github.com/abuzreq/diffusion_bending/issues"
+
+[tool.comfy]
+PublisherId = "abuzreq"
+DisplayName = "Diffusion Model Bending"
+Icon = ""
+
+# Use strict defaults
+strict = true
+warn_unreachable = true
+warn_no_return = true
+
