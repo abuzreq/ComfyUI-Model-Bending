@@ -4,11 +4,82 @@ import numpy as np
 import math
 import argparse
 import torch
+import torch.nn as nn
 import scipy.linalg
 import random
 from kornia import morphology, filters
+import kornia.geometry.transform as KT
 
 SAMPLING_RATE = None
+
+
+def inject_module(model: nn.Module, layer_path: str, new_module: nn.Module):
+    """
+    Replaces or appends a submodule in `model` at the location given by `layer_path`.
+
+    If append is False (default), the target module is replaced.
+    If append is True, the target module is expected to be an nn.ModuleList,
+    and the new module is appended to it.
+
+    Args:
+        model (nn.Module): The model instance.
+        layer_path (str): Dot-separated path to the target attribute,
+                          e.g., "output_blocks.0" (for replacement) or "output_blocks" (for appending).
+        new_module (nn.Module): The PyTorch module to inject.
+        append (bool): If True, append to a ModuleList. Otherwise, replace the module.
+    """
+    if len(layer_path) == 0:
+        return
+    parts = layer_path.split('.')
+    # Navigate to the parent of the target attribute.
+    parent = model
+    for part in parts[:-1]:
+
+        if part.isdigit():
+            parent = parent[int(part)]
+        else:
+            parent = getattr(parent, part)
+        print("part", part, parent)
+    last_part = parts[-1]
+
+    if not last_part.isdigit():
+        target_module = getattr(parent, last_part)
+        print("target_module", target_module)
+        if not isinstance(target_module, nn.ModuleList) and not isinstance(target_module, nn.Sequential):
+            seq = nn.Sequential()
+            seq.append(target_module)
+            seq.append(new_module)
+            setattr(parent, last_part, seq)
+
+            # raise ValueError(f"Target module at '{layer_path}' is not a ModuleList, cannot append.")
+            print(f"Appended new module and target module into new list.", seq)
+        else:
+            target_module.append(new_module)
+            print(f"Appended new module to ModuleList at '{layer_path}'.")
+    else:
+        target_module = parent[int(last_part)]
+        # Standard replacement logic.
+
+        idx = int(last_part)
+        parent.insert(idx + 1, new_module)
+        # parent[idx] = new_module
+
+        print(f"Injected custom module into '{layer_path}'.")
+
+
+def get_model_tree(module):
+    """
+    Recursively builds a nested dictionary representing the module's structure.
+
+    Returns a dictionary with the module type and any children modules.
+    """
+    tree = {"type": module.__class__.__name__}
+    children = dict(module.named_children())
+    if children:
+        tree["children"] = {name: get_model_tree(
+            child) for name, child in children.items()}
+
+    return tree
 
 
 def set_sampling_rate(sr):
@@ -76,6 +147,7 @@ def spectrum(audio, sr):
     frequencies = np.fft.rfftfreq(N, d=1. / sr)
 
     return amplitudes, frequencies
+
 
 def centroid(audio, sr):
     """
@@ -182,8 +254,6 @@ def flux(spectrum1, spectrum2):
     return spectral_flux
 
 
-
-
 def add_scalar(x, a):
     """
 
@@ -281,8 +351,10 @@ def add_noise(r):
 
     return lambda x: x + (torch.randn_like(x) * r)
 
+
 def multiply_scalar(r):
     return lambda x: x * (torch.ones_like(x) * r)
+
 
 def subtract_full(r):
     """
@@ -350,6 +422,7 @@ def log(r):
 def power(r):
     return lambda x: torch.pow(x, r)
 
+
 def add_dim(r, dim, i):
     def foo(x):
         """
@@ -371,6 +444,7 @@ def add_dim(r, dim, i):
         return x
 
     return foo
+
 
 def add_rand_cols(r, k):
     """
@@ -491,7 +565,8 @@ def add_normal(r):
         sigma = 1.5  # You can adjust this value as desired
 
         # Generate a 2D Gaussian distribution with peak at the center and specified standard deviation
-        Z = np.exp(-0.5 * ((X / sigma) ** 2 + (Y / sigma) ** 2)) / (2 * np.pi * sigma ** 2)
+        Z = np.exp(-0.5 * ((X / sigma) ** 2 + (Y / sigma) ** 2)) / \
+            (2 * np.pi * sigma ** 2)
         Z *= r
         Z = torch.from_numpy(Z).to(x.get_device())
 
@@ -529,9 +604,28 @@ def rotate_z(r):
             [0,    0,   1, 0],
             [0,    0,   0, 1]
         ]
-        op = torch.tensor(rotation_matrix).to(device)
+        op = torch.tensor(rotation_matrix, dtype=x.dtype, device=x.device)
+        x = x.squeeze(0)
         x = torch.tensordot(op, x, dims=1)
+        x = x.unsqueeze(0)
         return x
+    return fn
+
+
+def rotate_image(degrees):
+    def fn(x):
+        B, _, _, _ = x.shape
+        angle_tensor = torch.full(
+            (B,), degrees, device=x.device, dtype=x.dtype)
+        return KT.rotate(x, angle=angle_tensor)
+    return fn
+
+
+def scale_image(scale_factor):
+    def fn(x):
+        scale_tensor = torch.tensor(
+            [[scale_factor, scale_factor]], device=x.device, dtype=x.dtype)
+        return KT.scale(x, scale_tensor)
     return fn
 
 
@@ -541,6 +635,7 @@ def rotate_x(r):
     Rotates along "x" axis
     """
     def fn(x):
+
         device = x.get_device()
         c = math.cos(r)
         s = math.sin(r)
@@ -550,8 +645,11 @@ def rotate_x(r):
             [0, s,   c,    0],
             [0, 0,   0,    1]
         ]
-        op = torch.tensor(rotation_matrix).to(device)
+        op = torch.tensor(rotation_matrix, dtype=x.dtype, device=x.device)
+
+        x = x.squeeze(0)
         x = torch.tensordot(op, x, dims=1)
+        x = x.unsqueeze(0)
         return x
     return fn
 
@@ -571,8 +669,12 @@ def rotate_y(r):
             [-1 * s, 0, c, 0],
             [0,      0, 0, 1]
         ]
-        op = torch.tensor(rotation_matrix).to(device)
+        op = torch.tensor(rotation_matrix, dtype=x.dtype, device=x.device)
+
+        x = x.squeeze(0)
         x = torch.tensordot(op, x, dims=1)
+        x = x.unsqueeze(0)
+
         return x
     return fn
 
@@ -592,8 +694,11 @@ def rotate_y2(r):
             [0,      0, 1, 0],
             [-1 * s, 0, 0, c]
         ]
-        op = torch.tensor(rotation_matrix).to(device)
+        op = torch.tensor(rotation_matrix, dtype=x.dtype, device=x.device)
+        x = x.squeeze(0)
         x = torch.tensordot(op, x, dims=1)
+        x = x.unsqueeze(0)
+
         return x
     return fn
 
@@ -604,21 +709,23 @@ def reflect(r):
     r can be 0, 1, 2, or 3
     """
     def fn(x):
-        device = x.get_device()
-        op = torch.eye(4)  # identity matrix
+        op = torch.eye(4, device=x.device)  # identity matrix
         op[r, r] *= -1
-        op = op.to(device)
+        x = x.squeeze(0)
         x = torch.tensordot(op, x, dims=1)
+        x = x.unsqueeze(0)
         return x
     return fn
 
 
-def hadamard1(r):
+def hadamard1():
     def fn(x):
-        device = x.get_device()
         h = scipy.linalg.hadamard(4)
-        op = torch.tensor(h).to(torch.float32).to(device)
+        op = torch.tensor(h, dtype=x.dtype, device=x.device)
+        x = x.squeeze(0)
         x = torch.tensordot(op, x, dims=1)
+        x = x.unsqueeze(0)
+
         return x
     return fn
 
@@ -627,7 +734,7 @@ def hadamard2(r):
     def fn(x):
         device = x.get_device()
         h = scipy.linalg.hadamard(64)
-        op = torch.tensor(h).to(torch.float32).to(device)
+        op = torch.tensor(h).to(x.dtype).to(device)
         x = torch.tensordot(x, op, dims=[[1], [1]])
         return x
     return fn
@@ -637,7 +744,6 @@ def apply_both(fn1, fn2, r):
     def fn(x):
         return fn1(fn2(r))
     return fn
-
 
 
 def normalize(func):
@@ -687,10 +793,10 @@ def normalize4(func, dim=0):
     return fn
 
 
-def gradient():
+def gradient(r):
     def fn(x):
         # x = x.unsqueeze(0)
-        kernel = torch.ones(4, 4).to(x.get_device())
+        kernel = torch.ones(r, r, dtype=x.dtype, device=x.device)
         x = morphology.gradient(x, kernel)
         x = x.squeeze(0)
         return x
@@ -699,10 +805,8 @@ def gradient():
 
 def dilation(r):
     def fn(x):
-        print("dilation", x.shape)
         # x = x.unsqueeze(0)
-        kernel = torch.ones(r, r).to(x.get_device())
-        print("dilation2",x.shape, kernel.shape)
+        kernel = torch.ones(r, r, dtype=x.dtype, device=x.device)
         x = morphology.dilation(x, kernel)
         x = x.squeeze(0)
         return x
@@ -712,7 +816,7 @@ def dilation(r):
 def erosion(r):
     def fn(x):
         #  x = x.unsqueeze(0)
-        kernel = torch.ones(r, r).to(x.get_device())
+        kernel = torch.ones(r, r, dtype=x.dtype, device=x.device)
         x = morphology.erosion(x, kernel)
         x = x.squeeze(0)
         return x
@@ -726,7 +830,6 @@ def sobel(r=True):
         x = x.squeeze(0)
         return x
     return fn
-
 
 
 def absolute():
@@ -754,6 +857,7 @@ def log(r=math.e):
         return torch.log(x) / math.log(r)
     return fn
 
+
 def clamp(r1, r2):
     """
     Return a fn that clamps a tensor between min and max
@@ -767,6 +871,7 @@ def clamp(r1, r2):
         return x
     return fn
 
+
 def scale(r1, r2):
     """
     Return a fn that scales a tensor between min and max based on the tensor's min and max
@@ -776,12 +881,11 @@ def scale(r1, r2):
         device = x.get_device()
         x = x.cpu()
         xmin = x.min()
-        xmax = x.max()  
-        x = x.apply_(lambda y: (y - xmin) / (xmax - xmin) *(max - min) + min)
+        xmax = x.max()
+        x = x.apply_(lambda y: (y - xmin) / (xmax - xmin) * (max - min) + min)
         x = x.to(device)
         return x
     return fn
-
 
 
 # Define the functions that will be used in the latent bending operations
@@ -794,6 +898,7 @@ operations = {
     "rotate_x": rotate_x,
     "rotate_y": rotate_y,
     "rotate_z": rotate_z,
+    "rotate_image": rotate_image,
     "threshold": threshold,
     "soft_threshold": soft_threshold,
     "inversion": inversion,
@@ -802,7 +907,10 @@ operations = {
     "log": log,
     "clamp": clamp,
     "scale": scale,
+    "scale_image": scale_image,
     "gradient": gradient,
     "dilation": dilation,
     "erosion": erosion,
+    "sobel": sobel,
+    "hadamard1": hadamard1
 }

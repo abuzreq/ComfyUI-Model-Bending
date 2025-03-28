@@ -1,12 +1,29 @@
-# Diffusion Bending
+# Diffusion Model Bending
 This description is a work in progress, but here is a draft.
 
-These nodes implement techniqeus for [model bending](https://arxiv.org/abs/2005.12420), which allow you to apply transformations to the internal workings of your model in order to push it towards new and diverse aesthetics. Typically, model bending is applied to chosen layers in a model, e.g. in [GANs](https://github.com/terrybroad/network-bending) but in this implementation for diffusion model I implement it such that you can apply transformations at chosen denoising steps. 
+This project implements [model bending](https://github.com/terrybroad/network-bending) techniqeus for diffusion models in ComfyUI. Model bending allows you to apply transformations to the inner workings of your model in order to push it towards new and diverse aesthetics. You can see it as providing granual controls for introducing diversity and randomization beyond your simple randomization seeds. Transformations can include addition, multiplication, noise, rotation, erosion, dilation, to name a few, ... or even your own custom ones. 
+
+[image]()
+
+
+This project provides multiple ways to achieve bending:
+### 1. Model Bending: [[Workflow](workflows\basic_unet_bending.json)]
+Inject bending modules (torch.nn) into your models (specifically, your UNet but Comfy calls them MODEL). Plug in your model, pick or write a bending module, and choose the layer in your model where you would like to inject the bending module. The Model Inspector node is available to help you experiment with different layers. 
+### 2. VAE Bending [[Workflow](workflows\vae_bending.json)]
+Inject bending modules into your VAE models (Not as strong results as above but I haven't experimented enough to confirm). 
+### 3. Conditionings x Operations  [[Workflow](workflows\conditioning_bending.json)]
+Apply transforming operations to conditionings (what comes out of encoding with CLIP), this helps you move them around in the semantic latent space (i.e. that of CLIP's encodings)
+### 3. CFG Step-wise Operations [[Workflow](workflows\denoising_step_bending.json)]
+Apply transforming operations to the intermediate latents in the sampling/denoising process. In particular, you are asking your KSampler to apply a transformation right before a chosen cdf scaling step. Comfy currently provides an experimental support for applying transformation during all denoising steps, e.g., see LatentApplyOperationCFG and LATENT_OPERATION, where as the provided node (LatentApplyOperationCFGToStep) picks one step.
+
 
 ## Quickstart
 
 1. Install [ComfyUI](https://docs.comfy.org/get_started).
-1. Install [ComfyUI-Manager](https://github.com/ltdrdata/ComfyUI-Manager)
-1. Look up this extension in ComfyUI-Manager. If you are installing manually, clone this repository under `ComfyUI/custom_nodes`.
-1. Restart ComfyUI.
+2. Install [ComfyUI-Manager](https://github.com/ltdrdata/ComfyUI-Manager)
+3. Look up this extension in ComfyUI-Manager. If you are installing manually, clone this repository under `ComfyUI/custom_nodes`.
+4. Restart ComfyUI.
+5. All the nodes can be found under model_bending/
 
+## Notes
+This is an ongoing project. I am excited to share it with you and happy to respond to issues and features requests as time permits. 

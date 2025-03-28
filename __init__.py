@@ -1,13 +1,10 @@
 
 """Top-level package for diffusion_bending."""
-WEB_DIRECTORY = "./js"
-
 from .nodes import NODE_CLASS_MAPPINGS
-from .nodes import NODE_DISPLAY_NAME_MAPPINGS
+WEB_DIRECTORY = "./js"
 
 
 __all__ = [
     NODE_CLASS_MAPPINGS,
-    NODE_DISPLAY_NAME_MAPPINGS,
     WEB_DIRECTORY,
 ]
