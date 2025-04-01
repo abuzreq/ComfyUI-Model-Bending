@@ -32,7 +32,7 @@ class ShowModelStructure:
 
         tree = get_model_tree(model.model)
         # print("show model", tree)
-        PromptServer.instance.send_sync("model_bending.modeltree", {
+        PromptServer.instance.send_sync("inspect_model", {
                                         "tree": json.dumps(tree)})
 
         # with open('data.json', 'w', encoding='utf-8') as f:

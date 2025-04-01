@@ -40,7 +40,7 @@ app.registerExtension({
                 }
             }
         }
-        app.api.addEventListener("model_bending.modeltree", messageHandler);
+        api.addEventListener("inspect_model", messageHandler);
     },
 
     nodeCreated(node, app) {

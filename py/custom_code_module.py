@@ -29,7 +29,9 @@ def parse_dynamic(data: dict, key: str) -> list:
         vals.append([])
     return vals
 
-
+'''
+Inspired from https://github.com/filliptm/ComfyUI_Fill-Nodes
+'''
 class CodeNode:
     @classmethod
     def INPUT_TYPES(cls):
