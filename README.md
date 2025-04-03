@@ -5,10 +5,10 @@ This project provides multiple ways to achieve bending:
 ### 1. Model Bending: [[Workflow](workflows/basic_unet_bending.json)]
 Inject bending modules (torch.nn) into your models (specifically, your UNet but Comfy calls them MODEL). Plug in your model, pick or write a bending module, and choose the layer in your model where you would like to inject the bending module. The Model Inspector node is available to help you experiment with different layers. 
 
-An example of using the Rotate module to the middle block (middle_block.2.out_layers) of a UNet of the realisticvisionv51_v51vae model, doing a full rotation (0-360deg).
+Another example of injecting an Add Scalar module to the middle block (middle_block.2.out_layers) of a UNet of the sd_xl_turbo model. Amounts added range from -10 to 30, while freezing everything else (prompt, seed, ... etc.).
 ![image](docs/imgs/bending_add_analog_portrait.gif)
 
-Another example of injecting an Add Scalar module to the middle block (middle_block.2.out_layers) of a UNet of the sd_xl_turbo model. Amounts added range from -10 to 30, while freezing everything else (prompt, seed, ... etc.).
+An example of using the Rotate module to the middle block (middle_block.2.out_layers) of a UNet of the realisticvisionv51_v51vae model, doing a full rotation (0-360deg).
 ![image](docs/imgs/bending_rotate_analog_portrait.gif)
 
 ### 2. VAE Bending [[Workflow](workflows/vae_bending.json)]
