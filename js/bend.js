@@ -3,17 +3,24 @@ import { api } from "../../scripts/api.js";
 
 app.registerExtension({
     name: "model_bending",
-    async setup() {
+    async afterConfigureGraph() {
         function messageHandler(event) {
             // When the model is loaded we grab it's structure from the backend and visualize it
             for (var n of app.graph._nodes) {
                 if (n.title === "Model Inspector") {
+                    let forceUpdateWidget = n.widgets.find(
+                        (w) => w.name == "force_update"
+                    );
+                    if (!forceUpdateWidget) {
+                        console.error("forceUpdateWidget not found");
+                        continue;
+                    }
+
                     n.onDrawBackground = (ctx, graphcanvas) => {
-                        var forceUpdateWidget = n.widgets.find(
-                            (n) => n.name == "force_update"
-                        );
+                        const isForcedUpdate = forceUpdateWidget ? forceUpdateWidget.value : false;
+
                         if (
-                            forceUpdateWidget.value ||
+                            isForcedUpdate  ||
                             !Object.hasOwn(app, "modelViz")
                         ) {
                             const jsonData = JSON.parse(event.detail.tree);
@@ -28,7 +35,11 @@ app.registerExtension({
                                 n._size[1],
                                 n
                             );
-                            forceUpdateWidget.value = false;
+                            if(forceUpdateWidget)
+                            {
+                                forceUpdateWidget.value = false;
+                            }
+                            
                         }
                     };
 
@@ -86,7 +97,7 @@ app.registerExtension({
             const bool_operations = ["sobel"];
 
             function updateParameterVisibility() {
-                z;
+                
                 const op = operationWidget.value;
                 console.log("operationWidget", operationWidget);
 

@@ -22,7 +22,7 @@ class ShowModelStructure:
                 "path_placeholder": ("STRING",)
             }
         }
-    RETURN_TYPES = ("STRING",)
+    RETURN_TYPES = ("STRING","MODEL")
     FUNCTION = "show"
     CATEGORY = "model_bending"
     EXPERIMENTAL = True
@@ -31,17 +31,16 @@ class ShowModelStructure:
     def show(self, model, force_update, path_placeholder):
 
         tree = get_model_tree(model.model)
-        # print("show model", tree)
-        PromptServer.instance.send_sync("inspect_model", {
-                                        "tree": json.dumps(tree)})
+       
+        PromptServer.instance.send_sync("inspect_model", {"tree": json.dumps(tree)})
 
         # with open('data.json', 'w', encoding='utf-8') as f:
         #    json.dump(tree, f, ensure_ascii=False, indent=4)
-        return (path_placeholder, )
+        return (path_placeholder, model)
 
-    @classmethod
-    def IS_CHANGED(self, model, force_update, path_placeholder):
-        return hash(str(model.model))
+    #@classmethod
+    #def IS_CHANGED(self, model, force_update, path_placeholder):
+    #    return hash(str(model.model))
 
 
 class CustomModelBending:
@@ -144,7 +143,7 @@ class ThresholdModelBending(BaseModelBending):
     def INPUT_TYPES(s):
         return {
             "required": {
-                "threshold": ("FLOAT", {"default": 0.0, "min": -1, "max": 1, "step": 0.05}),
+                "threshold": ("FLOAT", {"default": 0.0,}),
             }
         }
 

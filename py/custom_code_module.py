@@ -44,7 +44,7 @@ class CodeNode:
                 "run_always": ("BOOLEAN", {"default": False})
             }}
 
-    CATEGORY = "model_patches/bending"
+    CATEGORY = "model_bending"
     EXPERIMENTAL = True
 
     RETURN_TYPES = ("BENDING_MODULE", "STRING", )
