@@ -8,7 +8,7 @@ from comfy.model_base import BaseModel
 from server import PromptServer
 
 from .py.custom_code_module import CodeNode
-from .py.bendutils import operations, inject_module, get_model_tree
+from .py.bendutils import operations, inject_module, get_model_tree, process_path
 from .py.bending_modules import *
 
 
@@ -18,7 +18,6 @@ class ShowModelStructure:
         return {
             "required": {
                 "model": ("MODEL",),
-                "force_update": ("BOOLEAN",),
                 "path_placeholder": ("STRING",)
             }
         }
@@ -26,50 +25,80 @@ class ShowModelStructure:
     FUNCTION = "show"
     CATEGORY = "model_bending"
     EXPERIMENTAL = True
-    DESCRIPTION = "Pick a layer by clicking on it in this inspector. If you changed models and the tree did not update then click force_update."
+    DESCRIPTION = "Pick a layer by clicking on it in this inspector."
 
-    def show(self, model, force_update, path_placeholder):
-
+    def show(self, model, path_placeholder):
+        
         tree = get_model_tree(model.model)
        
-        PromptServer.instance.send_sync("inspect_model", {"tree": json.dumps(tree)})
+        PromptServer.instance.send_sync("model_bending.inspect_model", {"tree": json.dumps(tree)})
 
         # with open('data.json', 'w', encoding='utf-8') as f:
         #    json.dump(tree, f, ensure_ascii=False, indent=4)
         return (path_placeholder, model)
 
     #@classmethod
-    #def IS_CHANGED(self, model, force_update, path_placeholder):
+    #def IS_CHANGED(self, model, path_placeholder):
     #    return hash(str(model.model))
 
+class SDModelBending:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "model": ("MODEL",),
+                "bending_module": ("BENDING_MODULE", ),
+                "block": (["input_blocks", "middle_block", "output_blocks"], {"default": "input_blocks"}),
+                "layer_num": ("INT", {"default": 0, "min": 0, "step": 1}),  
+            }
+        }
+    RETURN_TYPES = ("MODEL",)
+    FUNCTION = "patch"
+    CATEGORY = "model_bending"
+    DESCRIPTION = "Pick a layer out of input, middle or output blocks. This assumes a specific model structure that aligns with SD models, not tested on others."
+    EXPERIMENTAL = True
+    def find_conv2d_modules(self, model: nn.Module, parent_name: str = ''):
+                conv_layers = []
+                for name, module in model.named_modules():
+                    full_path = f"{parent_name}.{name}" if parent_name else name
+                    if isinstance(module, nn.Conv2d):
+                        conv_layers.append((full_path, module))
+                return conv_layers
+    
+    def patch(self, model, bending_module, block, layer_num):
+        m = copy.deepcopy(model)
 
+        convs = self.find_conv2d_modules(getattr(m.model.diffusion_model, block))
+        PromptServer.instance.send_sync("model_bending.bend_sd_model", {"num_layers": len(convs)})
+
+        if layer_num >= len(convs):
+            layer_num = len(convs) - 1 
+         
+        path_to_module, _ = convs[layer_num]
+        mod_path = "" if path_to_module == None or path_to_module == "" else process_path("diffusion_model."+block+ "."+ path_to_module)
+        
+        inject_module(m.model.diffusion_model,mod_path, bending_module)
+        return (m, )
+    
 class CustomModelBending:
     @classmethod
     def INPUT_TYPES(s):
         return {
             "required": {
                 "model": ("MODEL",),
-                "path": ("STRING",),
                 "bending_module": ("BENDING_MODULE", ),
+                "path": ("STRING",),
             }
+
         }
     RETURN_TYPES = ("MODEL",)
     FUNCTION = "patch"
     CATEGORY = "model_bending"
     EXPERIMENTAL = True
 
-    def process_path(self, path):
-        subclasses = ['BaseModel'] + \
-            [c.__name__.split('.')[-1] for c in BaseModel.__subclasses__()]
-        skip = "diffusion_model"
-        # clean up loose dots at start or end
-        start = 1 if path[0] == '.' else 0
-        end = -1 if path[-1] == '.' else len(path)
-        path = path[start:end]
+    
 
-        res = [x for x in path.split('.') if x != skip and x not in subclasses]
-        return res[0] if len(res) == 1 else '.'.join(res)
-
+   
     def patch(self, model, bending_module, path):
         m = copy.deepcopy(model)
         '''
@@ -77,14 +106,13 @@ class CustomModelBending:
         All models in comfy/model_base.py extend BaseModel. These include SDXL, Flux, Hunyuan, PixArt ...
         All BaseModel's have the property .diffusion_model as well
         '''
-        mod_path = "" if path == None or path == "" else self.process_path(
+        mod_path = "" if path == None or path == "" else process_path(
             path)
 
         inject_module(m.model.diffusion_model, mod_path, bending_module)
         return (m, )
 
 # ----------------------- (U-Net) Model Bending -------------------------
-
 
 class BaseModelBending:
     @classmethod
@@ -182,7 +210,7 @@ class ErosionModelBending(BaseModelBending):
     def INPUT_TYPES(s):
         return {
             "required": {
-                "kernel_size": ("INT", {"default": 0.0, "min": 1, "max": 100.0, "step": 1}),
+                "kernel_size": ("INT", {"default": 0, "min": 1, "max": 10, "step": 1}),
             }
         }
 
@@ -195,7 +223,7 @@ class DilationModelBending(BaseModelBending):
     def INPUT_TYPES(s):
         return {
             "required": {
-                "kernel_size": ("INT", {"default": 0.0, "min": 1, "max": 100.0, "step": 1}),
+                "kernel_size": ("INT", {"default": 0, "min": 1, "max": 10, "step": 1}),
             }
         }
 
@@ -208,7 +236,7 @@ class GradientModelBending(BaseModelBending):
     def INPUT_TYPES(s):
         return {
             "required": {
-                "kernel_size": ("INT", {"default": 0.0, "min": 1, "max": 100.0, "step": 1}),
+                "kernel_size": ("INT", {"default": 0, "min": 1, "max": 10, "step": 1}),
             }
         }
 
@@ -488,6 +516,7 @@ NODE_CLASS_MAPPINGS = {
     "Latent Operation To Module": LatentOperationToModule,
     "Custom Code Module": CodeNode,
     "Model Bending": CustomModelBending,
+    "Model Bending (SD Layers)": SDModelBending,
     "Model VAE Bending": CustomModuleVAEBending,
     "Model Inspector": ShowModelStructure,
 

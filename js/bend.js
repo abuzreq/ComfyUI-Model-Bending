@@ -8,50 +8,42 @@ app.registerExtension({
             // When the model is loaded we grab it's structure from the backend and visualize it
             for (var n of app.graph._nodes) {
                 if (n.title === "Model Inspector") {
-                    let forceUpdateWidget = n.widgets.find(
-                        (w) => w.name == "force_update"
+                    let treeData = convertJSONTree(
+                        JSON.parse(event.detail.tree),
+                        undefined,
+                        ""
                     );
-                    if (!forceUpdateWidget) {
-                        console.error("forceUpdateWidget not found");
-                        continue;
+                    let hasChanged = !deepCompare(
+                        treeData,
+                        n.modelViz.treeData
+                    );
+                    
+                    if (hasChanged) {
+                        n.modelViz.treeData = treeData;
+                        n.modelViz.renderTree(); // Call the renderTree method to update the visualization
                     }
-
-                    n.onDrawBackground = (ctx, graphcanvas) => {
-                        const isForcedUpdate = forceUpdateWidget ? forceUpdateWidget.value : false;
-
-                        if (
-                            isForcedUpdate  ||
-                            !Object.hasOwn(app, "modelViz")
-                        ) {
-                            const jsonData = JSON.parse(event.detail.tree);
-                            treeData = convertJSONTree(jsonData, undefined, "");
-                            app.modelViz = new ModelViz(
-                                app,
-                                ctx,
-                                ctx.canvas,
-                                n._pos[0],
-                                n._pos[1],
-                                n._size[0],
-                                n._size[1],
-                                n
-                            );
-                            if(forceUpdateWidget)
-                            {
-                                forceUpdateWidget.value = false;
-                            }
-                            
-                        }
-                    };
-
-                    n.onDrawForeground = function (ctx, graphcanvas) {
-                        if (app.modelViz != undefined && app.modelViz != null) {
-                            app.modelViz.renderTree();
-                        }
-                    };
                 }
             }
         }
-        api.addEventListener("inspect_model", messageHandler);
+
+        function updateNumLayers(event) {
+            for (var n of app.graph._nodes) {
+                if (n.title === "Model Bending (SD Layers)") {
+                    console.log(event.detail.num_layers);
+                    let numLayers = event.detail.num_layers;
+                    const layerNumWidget = n.widgets.find(
+                        (w) => w.name === "layer_num"
+                    );
+
+                    layerNumWidget.options.max = numLayers - 1;
+                    if (layerNumWidget.value >= numLayers) {
+                        layerNumWidget.value = numLayers - 1;
+                    }
+                }
+            }
+        }
+        api.addEventListener("model_bending.inspect_model", messageHandler);
+        api.addEventListener("model_bending.bend_sd_model", updateNumLayers);
     },
 
     nodeCreated(node, app) {
@@ -61,10 +53,26 @@ app.registerExtension({
             );
             placeholderWidget.disabled = true;
             node.size = [450, 500];
-            
+
             node.onResize = (newSize) => {
-                if (Object.hasOwn(app, "modelViz")) {
-                    app.modelViz.updateSize(newSize[0], newSize[1]);
+                if (Object.hasOwn(node, "modelViz")) {
+                    node.modelViz.updateSize(newSize[0], newSize[1]);
+                }
+            };
+
+            node.modelViz = new ModelViz(
+                app,
+                app.ctx,
+                app.ctx.canvas,
+                node,
+                null
+            );
+
+            node.onDrawForeground = function (ctx, graphcanvas) {
+                if (node.modelViz != undefined && node.modelViz != null) {
+                    node.modelViz.ctx = ctx;
+                    node.modelViz.canvas = ctx.canvas;
+                    node.modelViz.renderTree();
                 }
             };
         } else if (node.title === "Latent Operation (Custom)") {
@@ -97,7 +105,6 @@ app.registerExtension({
             const bool_operations = ["sobel"];
 
             function updateParameterVisibility() {
-                
                 const op = operationWidget.value;
                 console.log("operationWidget", operationWidget);
 
@@ -141,16 +148,7 @@ app.registerExtension({
 });
 
 class ModelViz {
-    constructor(
-        app,
-        ctx,
-        canvas,
-        nodeX,
-        nodeY,
-        nodeWidth,
-        nodeHeight,
-        comfynode
-    ) {
+    constructor(app, ctx, canvas, comfynode, treeData) {
         // Layout settings
         this.nodeRowHeight = 18; // Height for each node row
         this.rowIndent = 20; // Indentation per tree level
@@ -164,12 +162,9 @@ class ModelViz {
         this.app = app;
         this.ctx = ctx;
         this.canvas = canvas;
-        this.nodeX = nodeX;
-        this.nodeY = nodeY;
-        this.nodeWidth = nodeWidth;
-        this.nodeHeight = nodeHeight;
-        this.comfynode = comfynode;
 
+        this.comfynode = comfynode;
+        this.treeData = treeData;
         console.log(this.ctx, this.canvas, this.app);
 
         // Initial render of the tree view.
@@ -178,9 +173,10 @@ class ModelViz {
         this.canvas.addEventListener("click", (event) => {
             this.app.canvas.adjustMouseEvent(event);
 
-            const clickX = event.canvasX - this.nodeX - this.offsetXInNode;
-            const clickY = event.canvasY - this.nodeY - this.offsetYInNode;
-           
+            const clickX =
+                event.canvasX - this.comfynode._pos[0] - this.offsetXInNode;
+            const clickY =
+                event.canvasY - this.comfynode._pos[1] - this.offsetYInNode;
             for (const item of this.visibleNodes) {
                 const { node, depth, y } = item;
                 node.selected = false;
@@ -194,10 +190,9 @@ class ModelViz {
                 const region = {
                     x: caretX - margin,
                     y: caretY - this.caretSize / 2 - margin,
-                    width: this.nodeWidth - caretX, 
+                    width: this.comfynode._size[0] - caretX,
                     height: this.caretSize + 2 * margin,
                 };
-
                 if (
                     clickX >= region.x &&
                     clickX <= region.x + region.width &&
@@ -205,7 +200,6 @@ class ModelViz {
                     clickY <= region.y + region.height
                 ) {
                     // Toggle the collapsed state and re-render.
-                    
                     this.comfynode.setOutputData(0, node.path);
                     var pathPlaceholder = this.comfynode.widgets.find(
                         (w) => w.name == "path_placeholder"
@@ -217,12 +211,10 @@ class ModelViz {
                     if (node.children) {
                         node.collapsed = !node.collapsed;
                     }
-                    
+
                     this.renderTree();
                     break;
                 }
-                
-                
             }
         });
     }
@@ -250,20 +242,27 @@ class ModelViz {
         }
         return currentY;
     }
-    updateSize(newNodeWidth, newNodeHeight)
-    {
-        this.nodeWidth = newNodeWidth;
-        this.nodeHeight = newNodeHeight;
-        this.renderTree()
+    updateSize(newNodeWidth, newNodeHeight) {
+        // this.nodeWidth = newNodeWidth;
+        // this.nodeHeight = newNodeHeight;
+        this.renderTree();
     }
 
     /**
      * Renders the tree on the canvas.
      */
     renderTree() {
-        this.ctx.clearRect(0, 0, this.nodeWidth, this.nodeHeight);
+        this.ctx.clearRect(
+            0,
+            0,
+            this.comfynode._size[0],
+            this.comfynode._size[1]
+        );
         this.visibleNodes = [];
-        this.computeVisibleNodes(treeData, 0, 0, this.visibleNodes);
+        if (!this.treeData) {
+            return;
+        }
+        this.computeVisibleNodes(this.treeData, 0, 0, this.visibleNodes);
 
         this.visibleNodes.forEach((item) => {
             const { node, depth, y } = item;
@@ -271,7 +270,12 @@ class ModelViz {
             var ny = y + this.offsetYInNode;
             // Optional: draw a white background for clarity.
             this.ctx.fillStyle = "#fff";
-            this.ctx.fillRect(0, ny, this.nodeWidth, this.nodeRowHeight - 1);
+            this.ctx.fillRect(
+                0,
+                ny,
+                this.comfynode._size[0],
+                this.nodeRowHeight - 1
+            );
 
             // Draw the node text (shift text right if there is a caret)
             this.ctx.fillStyle = node.selected ? "#00f" : "#000";
@@ -347,4 +351,29 @@ function convertJSONTree(json, key = null, path) {
     return newNode;
 }
 
-let treeData = {};
+function deepCompare(obj1, obj2, excludedKeys = ["collapsed", "selected"]) {
+    if (typeof obj1 !== typeof obj2) return false;
+
+    if (typeof obj1 === "object" && obj1 !== null && obj2 !== null) {
+        const keys1 = Object.keys(obj1).filter(
+            (key) => !excludedKeys.includes(key)
+        );
+        const keys2 = Object.keys(obj2).filter(
+            (key) => !excludedKeys.includes(key)
+        );
+
+        if (keys1.length !== keys2.length) return false;
+
+        for (let key of keys1) {
+            if (
+                !keys2.includes(key) ||
+                !deepCompare(obj1[key], obj2[key], excludedKeys)
+            ) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    return obj1 === obj2;
+}

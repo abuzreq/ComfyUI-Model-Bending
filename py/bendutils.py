@@ -9,6 +9,7 @@ import scipy.linalg
 import random
 from kornia import morphology, filters
 import kornia.geometry.transform as KT
+from comfy.model_base import BaseModel
 
 SAMPLING_RATE = None
 
@@ -66,6 +67,17 @@ def inject_module(model: nn.Module, layer_path: str, new_module: nn.Module):
 
         print(f"Injected custom module into '{layer_path}'.")
 
+def process_path(path):
+        subclasses = ['BaseModel'] + \
+            [c.__name__.split('.')[-1] for c in BaseModel.__subclasses__()]
+        skip = "diffusion_model"
+        # clean up loose dots at start or end
+        start = 1 if path[0] == '.' else 0
+        end = -1 if path[-1] == '.' else len(path)
+        path = path[start:end]
+
+        res = [x for x in path.split('.') if x != skip and x not in subclasses]
+        return res[0] if len(res) == 1 else '.'.join(res)
 
 def get_model_tree(module):
     """

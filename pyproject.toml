@@ -1,6 +1,6 @@
 [project]
 name = "ComfyUI-Model-Bending"
-version = "0.0.3.1"
+version = "0.0.4"
 description = "Use model bending to push your model beyond its visuals limits. These nodes allow you to apply transformations to the intemediate densoising steps during sampling, e.g. add, multiplty, scale, rotate, dilate, erode ..etc."
 readme = "README.md"
 license = {file = "LICENSE"}
