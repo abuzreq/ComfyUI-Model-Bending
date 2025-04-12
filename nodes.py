@@ -8,8 +8,103 @@ from comfy.model_base import BaseModel
 from server import PromptServer
 
 from .py.custom_code_module import CodeNode
-from .py.bendutils import operations, inject_module, get_model_tree, process_path
+from .py.bendutils import operations, inject_module, hook_module, get_model_tree, process_path
 from .py.bending_modules import *
+
+
+# Custom node that outputs the intermediate result.
+class IntermediateOutputNode:
+    """
+    A custom node that:
+      - Takes a MODEL (PyTorch model),
+      - A LAYER_PATH (dot-separated string),
+      - An INPUT tensor,
+      - A timestep (float),
+
+    It runs the model and returns the intermediate activation from the target layer as well as the final output.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "model": ("MODEL",),        # A PyTorch model.
+                "layer_path": ("STRING",),  # e.g. "features.1"
+                "input": ("LATENT",),       # Input tensor for the model.
+                "timestep": ("FLOAT", {"default": 0.0}),
+
+            }
+        }
+    RETURN_TYPES = ("IMAGE", "IMAGE")
+    RETURN_NAMES = ("UNet Output", "Feature Map")
+    FUNCTION = "process"
+    CATEGORY = "model_bending"
+    EXPERIMENTAL = True
+
+    DESCRIPTION = "Runs the UNet of the model and outputs the final results (i.e. denoising results given timestep) as well as the feature map (aggregated) for the chosen layer."
+
+    def process(self, model, layer_path, input, timestep):
+        m = copy.deepcopy(model)
+        device = torch.device(
+            "cuda") if torch.cuda.is_available() else torch.device("cpu")
+        m.model = m.model.to(device=device)
+
+        mod_path = "" if layer_path == None or layer_path == "" else process_path(
+            layer_path)
+        intermediate = {}
+        if mod_path != "":
+            def hook(module, inputs, output):
+                intermediate['output'] = output
+
+            # Navigate to the target module using the layer_path.
+            parts = mod_path.split('.')
+            target_module = m.model.diffusion_model
+            for part in parts:
+                if part.isdigit():
+                    target_module = target_module[int(part)]
+                else:
+                    target_module = getattr(target_module, part)
+
+            # Register the hook.
+            handle = target_module.register_forward_hook(hook)
+
+        # Preparing inputs for the model.
+        x = input["samples"]
+        batch_size = x.shape[0]
+        timesteps = torch.tensor(
+            [timestep] * batch_size, device=device, dtype=m.model_dtype())
+        c_crossattn = torch.zeros(
+            batch_size, 77, 768, device=device, dtype=m.model_dtype())
+        x = x.type(m.model_dtype()).to(device=device)
+
+        # forward pass to get the intermediate output
+        with torch.no_grad():
+            final_output = m.model.apply_model(
+                x, timesteps, c_crossattn=c_crossattn)  # , transformer_options=topt
+
+            print("final_output", final_output.shape)
+
+        # Remove the hook.
+        if mod_path != "":
+            handle.remove()
+
+        # Aggregate the weights of the intermediate output and put it in the right shape so we could visualize it
+        combined_features = torch.zeros((batch_size, 64, 64, 4), device=device)
+        intermediate_outputs = intermediate.get('output', None)
+        if intermediate_outputs is not None:
+            feature_maps = []
+            for i in range(0, intermediate_outputs.shape[0]):
+                iout = intermediate_outputs[i]
+                gray_scale = torch.sum(iout, 0)
+                gray_scale = gray_scale / iout.shape[0]
+                gray_scale = gray_scale.unsqueeze(0).unsqueeze(0)
+                repeated_gray_scale = gray_scale.permute(
+                    0, 2, 3, 1).repeat(1, 1, 1, 4)
+                feature_maps.append(repeated_gray_scale)
+
+            combined_features = torch.cat(feature_maps, dim=0)
+
+        return (final_output.permute(0, 2, 3, 1),   combined_features,)
 
 
 class ShowModelStructure:
@@ -21,25 +116,26 @@ class ShowModelStructure:
                 "path_placeholder": ("STRING",)
             }
         }
-    RETURN_TYPES = ("STRING","MODEL")
+    RETURN_TYPES = ("STRING", "MODEL")
     FUNCTION = "show"
     CATEGORY = "model_bending"
-    EXPERIMENTAL = True
     DESCRIPTION = "Pick a layer by clicking on it in this inspector."
 
     def show(self, model, path_placeholder):
-        
+
         tree = get_model_tree(model.model)
-       
-        PromptServer.instance.send_sync("model_bending.inspect_model", {"tree": json.dumps(tree)})
+
+        PromptServer.instance.send_sync("model_bending.inspect_model", {
+                                        "tree": json.dumps(tree)})
 
         # with open('data.json', 'w', encoding='utf-8') as f:
         #    json.dump(tree, f, ensure_ascii=False, indent=4)
         return (path_placeholder, model)
 
-    #@classmethod
-    #def IS_CHANGED(self, model, path_placeholder):
+    # @classmethod
+    # def IS_CHANGED(self, model, path_placeholder):
     #    return hash(str(model.model))
+
 
 class SDModelBending:
     @classmethod
@@ -49,37 +145,41 @@ class SDModelBending:
                 "model": ("MODEL",),
                 "bending_module": ("BENDING_MODULE", ),
                 "block": (["input_blocks", "middle_block", "output_blocks"], {"default": "input_blocks"}),
-                "layer_num": ("INT", {"default": 0, "min": 0, "step": 1}),  
+                "layer_num": ("INT", {"default": 0, "min": 0, "step": 1}),
             }
         }
     RETURN_TYPES = ("MODEL",)
     FUNCTION = "patch"
     CATEGORY = "model_bending"
     DESCRIPTION = "Pick a layer out of input, middle or output blocks. This assumes a specific model structure that aligns with SD models, not tested on others."
-    EXPERIMENTAL = True
+
     def find_conv2d_modules(self, model: nn.Module, parent_name: str = ''):
-                conv_layers = []
-                for name, module in model.named_modules():
-                    full_path = f"{parent_name}.{name}" if parent_name else name
-                    if isinstance(module, nn.Conv2d):
-                        conv_layers.append((full_path, module))
-                return conv_layers
-    
+        conv_layers = []
+        for name, module in model.named_modules():
+            full_path = f"{parent_name}.{name}" if parent_name else name
+            if isinstance(module, nn.Conv2d):
+                conv_layers.append((full_path, module))
+        return conv_layers
+
     def patch(self, model, bending_module, block, layer_num):
         m = copy.deepcopy(model)
 
-        convs = self.find_conv2d_modules(getattr(m.model.diffusion_model, block))
-        PromptServer.instance.send_sync("model_bending.bend_sd_model", {"num_layers": len(convs)})
+        convs = self.find_conv2d_modules(
+            getattr(m.model.diffusion_model, block))
+        PromptServer.instance.send_sync("model_bending.bend_sd_model", {
+                                        "num_layers": len(convs)})
 
         if layer_num >= len(convs):
-            layer_num = len(convs) - 1 
-         
+            layer_num = len(convs) - 1
+
         path_to_module, _ = convs[layer_num]
-        mod_path = "" if path_to_module == None or path_to_module == "" else process_path("diffusion_model."+block+ "."+ path_to_module)
-        
-        inject_module(m.model.diffusion_model,mod_path, bending_module)
+        mod_path = "" if path_to_module == None or path_to_module == "" else process_path(
+            "diffusion_model."+block + "." + path_to_module)
+
+        hook_module(m.model.diffusion_model, mod_path, bending_module)
         return (m, )
-    
+
+
 class CustomModelBending:
     @classmethod
     def INPUT_TYPES(s):
@@ -94,11 +194,7 @@ class CustomModelBending:
     RETURN_TYPES = ("MODEL",)
     FUNCTION = "patch"
     CATEGORY = "model_bending"
-    EXPERIMENTAL = True
 
-    
-
-   
     def patch(self, model, bending_module, path):
         m = copy.deepcopy(model)
         '''
@@ -109,10 +205,11 @@ class CustomModelBending:
         mod_path = "" if path == None or path == "" else process_path(
             path)
 
-        inject_module(m.model.diffusion_model, mod_path, bending_module)
+        hook_module(m.model.diffusion_model, mod_path, bending_module)
         return (m, )
 
 # ----------------------- (U-Net) Model Bending -------------------------
+
 
 class BaseModelBending:
     @classmethod
@@ -121,7 +218,6 @@ class BaseModelBending:
     RETURN_TYPES = ("BENDING_MODULE",)
     FUNCTION = "patch"
     CATEGORY = "model_bending"
-    EXPERIMENTAL = True
 
     def patch(self):
         pass
@@ -171,7 +267,7 @@ class ThresholdModelBending(BaseModelBending):
     def INPUT_TYPES(s):
         return {
             "required": {
-                "threshold": ("FLOAT", {"default": 0.0,}),
+                "threshold": ("FLOAT", {"default": 0.0, }),
             }
         }
 
@@ -293,7 +389,6 @@ class LatentApplyBendingOperationCFG:
     FUNCTION = "patch"
 
     CATEGORY = "model_bending"
-    EXPERIMENTAL = True
     DESCRIPTION = """
     Applies the provided operation to an intermediate step in the latent denoising process.
     """
@@ -335,7 +430,6 @@ class BaseLatentOperation:
     FUNCTION = "op"
 
     CATEGORY = "model_bending"
-    EXPERIMENTAL = True
 
     def op(self):
         pass
@@ -422,6 +516,8 @@ class LatentOperationRotate(BaseLatentOperation):
 
 
 class LatentOperationGeneric(BaseLatentOperation):
+    EXPERIMENTAL = True
+
     @classmethod
     def INPUT_TYPES(s):
         return {
@@ -474,12 +570,12 @@ class CustomModuleVAEBending:
     RETURN_TYPES = ("VAE",)
     FUNCTION = "patch"
     CATEGORY = "model_bending"
-    EXPERIMENTAL = True
+    DESCRIPTION = "Bends a VAE model by injecting a module at the specified path."
 
     def patch(self, vae, path, bending_module):
 
         m = copy.deepcopy(vae)
-        inject_module(m.patcher.model, path, bending_module)
+        hook_module(m.patcher.model, path, bending_module)
         return (m, )
 
 
@@ -530,6 +626,9 @@ NODE_CLASS_MAPPINGS = {
     "Gradient Module (Bending)": GradientModelBending,
     "Dilation Module (Bending)": DilationModelBending,
     "Sobel Module (Bending)": SobelModelBending,
+
+
+    "Visualize Feature Map": IntermediateOutputNode,
 
     "LatentApplyOperationCFGToStep": LatentApplyBendingOperationCFG,
     "Latent Operation (Multiply Scalar)": LatentOperationMultiplyScalar,

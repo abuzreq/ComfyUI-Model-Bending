@@ -13,11 +13,12 @@ app.registerExtension({
                         undefined,
                         ""
                     );
+
                     let hasChanged = !deepCompare(
                         treeData,
                         n.modelViz.treeData
                     );
-                    
+
                     if (hasChanged) {
                         n.modelViz.treeData = treeData;
                         n.modelViz.renderTree(); // Call the renderTree method to update the visualization
@@ -177,9 +178,13 @@ class ModelViz {
                 event.canvasX - this.comfynode._pos[0] - this.offsetXInNode;
             const clickY =
                 event.canvasY - this.comfynode._pos[1] - this.offsetYInNode;
+
             for (const item of this.visibleNodes) {
                 const { node, depth, y } = item;
                 node.selected = false;
+            }
+            for (const item of this.visibleNodes) {
+                const { node, depth, y } = item;
 
                 // Calculate caret coordinates as in the drawing code.
                 const caretX = depth * this.rowIndent + this.rowPadding;
@@ -279,7 +284,11 @@ class ModelViz {
 
             // Draw the node text (shift text right if there is a caret)
             this.ctx.fillStyle = node.selected ? "#00f" : "#000";
-            this.ctx.font = "14px sans-serif";
+            this.ctx.strokeStyle = "#000";
+
+            this.ctx.font = node.selected
+                ? "bold 14px sans-serif"
+                : "14px sans-serif";
             this.ctx.textBaseline = "middle";
             const textX =
                 x + this.rowPadding + (node.children ? this.caretSize + 5 : 0);

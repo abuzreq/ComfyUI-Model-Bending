@@ -14,6 +14,79 @@ from comfy.model_base import BaseModel
 SAMPLING_RATE = None
 
 
+def hook_module(model: nn.Module, layer_path: str, new_module: nn.Module):
+    """
+    Injects new_module into model at the specified layer_path.
+
+    - If the target module supports hooks, a forward hook is registered that calls new_module,
+      passing output, positional arguments, and keyword arguments.
+    - If the target module is not hookable (e.g. a bare nn.ModuleList which has no proper forward),
+      the target is wrapped in a new container (a Sequential) that appends new_module.
+
+    Args:
+        model (nn.Module): The model instance.
+        layer_path (str): Dot-separated path to the target module
+            e.g. "features.3" or "block.0"
+        new_module (nn.Module): The module to inject.
+
+    Returns:
+        A hook handle if a hook is registered, otherwise None.
+    """
+    if not layer_path:
+        return
+
+    # Split and navigate to the parent of the target module.
+    parts = layer_path.split('.')
+    parent = model
+    for part in parts[:-1]:
+        if part.isdigit():
+            parent = parent[int(part)]
+        else:
+            parent = getattr(parent, part)
+    last_part = parts[-1]
+
+    # Get the target module reference.
+    if last_part.isdigit():
+        idx = int(last_part)
+        target_module = parent[idx]
+    else:
+        target_module = getattr(parent, last_part)
+
+    # Decide whether to hook or wrap:
+    # In this example, if the target is an nn.ModuleList (that isn’t already a Sequential),
+    # we consider it not properly hookable.
+    if isinstance(target_module, nn.ModuleList):
+        print("Module List detected, wrapping in Sequential.")
+        # Wrap by creating a new Sequential that contains the modules from target_module,
+        # and then appending the new_module.
+        # We don't simply append to the ModuleList instance because there is no guarantee that the list's items will be iterated on and called during the model execution.
+        modules = list(target_module)
+        modules.append(new_module)
+        new_seq = nn.Sequential(*modules)
+        # Replace the attribute in the parent with the new Sequential.
+        if last_part.isdigit():
+            parent[int(last_part)] = new_seq
+        else:
+            setattr(parent, last_part, new_seq)
+        print(
+            f"Wrapped ModuleList at '{layer_path}' in a Sequential that appends the new module.")
+        return None
+    elif isinstance(target_module, nn.Sequential):
+        target_module.append(new_module)
+    else:
+        # Otherwise, register a forward hook.
+        def hook(module, args, kwargs, output):
+            print("HOOKED")
+            # Call the injected new_module, passing the output plus original args and kwargs.
+            return new_module(output, *args, **kwargs)
+        
+        # The with_kwargs flag lets the hook capture both positional args and keyword args.
+        handle = target_module.register_forward_hook(hook, with_kwargs=True)
+        print(target_module, dir(target_module), handle)
+        print(f"Registered hook on module at '{layer_path}'.")
+        return handle
+
+
 def inject_module(model: nn.Module, layer_path: str, new_module: nn.Module):
     """
     Replaces or appends a submodule in `model` at the location given by `layer_path`.
@@ -28,6 +101,11 @@ def inject_module(model: nn.Module, layer_path: str, new_module: nn.Module):
                           e.g., "output_blocks.0" (for replacement) or "output_blocks" (for appending).
         new_module (nn.Module): The PyTorch module to inject.
         append (bool): If True, append to a ModuleList. Otherwise, replace the module.
+
+
+    Note: An older version of hook_module that injects the new_module into the model. 
+    However, in some cases adding new modules into an existing model is intrusive and may change how the model behaves so I am suing hook_module instead. 
+
     """
     if len(layer_path) == 0:
         return
@@ -40,12 +118,11 @@ def inject_module(model: nn.Module, layer_path: str, new_module: nn.Module):
             parent = parent[int(part)]
         else:
             parent = getattr(parent, part)
-        print("part", part, parent)
     last_part = parts[-1]
 
     if not last_part.isdigit():
         target_module = getattr(parent, last_part)
-        print("target_module", target_module)
+
         if not isinstance(target_module, nn.ModuleList) and not isinstance(target_module, nn.Sequential):
             seq = nn.Sequential()
             seq.append(target_module)
@@ -66,18 +143,21 @@ def inject_module(model: nn.Module, layer_path: str, new_module: nn.Module):
         # parent[idx] = new_module
 
         print(f"Injected custom module into '{layer_path}'.")
+    print("Updated Model Part", parent)
+
 
 def process_path(path):
-        subclasses = ['BaseModel'] + \
-            [c.__name__.split('.')[-1] for c in BaseModel.__subclasses__()]
-        skip = "diffusion_model"
-        # clean up loose dots at start or end
-        start = 1 if path[0] == '.' else 0
-        end = -1 if path[-1] == '.' else len(path)
-        path = path[start:end]
+    subclasses = ['BaseModel'] + \
+        [c.__name__.split('.')[-1] for c in BaseModel.__subclasses__()]
+    skip = "diffusion_model"
+    # clean up loose dots at start or end
+    start = 1 if path[0] == '.' else 0
+    end = -1 if path[-1] == '.' else len(path)
+    path = path[start:end]
 
-        res = [x for x in path.split('.') if x != skip and x not in subclasses]
-        return res[0] if len(res) == 1 else '.'.join(res)
+    res = [x for x in path.split('.') if x != skip and x not in subclasses]
+    return res[0] if len(res) == 1 else '.'.join(res)
+
 
 def get_model_tree(module):
     """
@@ -626,7 +706,7 @@ def rotate_z(r):
 
 def rotate_image(degrees):
     def fn(x):
-        B, _, _, _ = x.shape
+        B = x.shape[0]
         angle_tensor = torch.full(
             (B,), degrees, device=x.device, dtype=x.dtype)
         return KT.rotate(x, angle=angle_tensor)

@@ -15,8 +15,11 @@ An example of using the Rotate module to the middle block (middle_block.2.out_la
 Inject bending modules into your VAE models (Not as strong results as above but I haven't experimented enough to confirm). 
 ### 3. Conditionings x Operations  [[Workflow](workflows/conditioning_bending.json)]
 Apply transforming operations to conditionings (what comes out of encoding with CLIP), this helps you move them around in the semantic latent space (i.e. that of CLIP's encodings)
-### 3. CFG Step-wise Operations [[Workflow](workflows/denoising_step_bending.json)]
+### 4. CFG Step-wise Operations [[Workflow](workflows/denoising_step_bending.json)]
 Apply transforming operations to the intermediate latents in the sampling/denoising process. In particular, you are asking your KSampler to apply a transformation right before a chosen cdf scaling step. Comfy currently provides an experimental support for applying transformation during all denoising steps, e.g., see LatentApplyOperationCFG and LATENT_OPERATION, where as the provided node (LatentApplyOperationCFGToStep) picks one step.
+
+### 5. (NEW) Feature Map Visualization [[Workflow](workflows/feature_map_viz.json)]
+By plugging in a model and a path to a layer, the Visualize Feature Map node shows the features/weights at that layer. It does so by averaging over the channels to get image-like tensors that can be vizualized. [Source](https://ravivaishnav20.medium.com/visualizing-feature-maps-using-pytorch-12a48cd1e573). 
 
 ## Quickstart
 
