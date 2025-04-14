@@ -76,7 +76,6 @@ def hook_module(model: nn.Module, layer_path: str, new_module: nn.Module):
     else:
         # Otherwise, register a forward hook.
         def hook(module, args, kwargs, output):
-            print("HOOKED")
             # Call the injected new_module, passing the output plus original args and kwargs.
             return new_module(output, *args, **kwargs)
         

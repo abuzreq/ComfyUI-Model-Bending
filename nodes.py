@@ -6,7 +6,9 @@ import comfy.model_management
 import comfy.utils
 from comfy.model_base import BaseModel
 from server import PromptServer
+import folder_paths
 
+import logging
 from .py.custom_code_module import CodeNode
 from .py.bendutils import operations, inject_module, hook_module, get_model_tree, process_path
 from .py.bending_modules import *
@@ -137,6 +139,76 @@ class ShowModelStructure:
     #    return hash(str(model.model))
 
 
+class LoRABending:
+    def __init__(self):
+        self.loaded_lora = None
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "model": ("MODEL",),
+                "clip": ("CLIP", {"tooltip": "The CLIP model the LoRA will be applied to."}),
+                "lora_name": (folder_paths.get_filename_list("loras"), {"tooltip": "The name of the LoRA."}),
+                "bending_module": ("BENDING_MODULE", ),
+            }
+        }
+    RETURN_TYPES = ("MODEL", "CLIP")
+    FUNCTION = "patch"
+    CATEGORY = "model_bending"
+    DESCRIPTION = "Bending LoRAs. Finds all the LoRA matrices that were added to the model and applies a bending_module to them."
+
+    def patch(self, model, clip, lora_name, bending_module):
+        # m = copy.deepcopy(model)
+
+        lora_path = folder_paths.get_full_path_or_raise("loras", lora_name)
+        lora = None
+        if self.loaded_lora is not None:
+            if self.loaded_lora[0] == lora_path:
+                lora = self.loaded_lora[1]
+            else:
+                self.loaded_lora = None
+
+        if lora is None:
+            lora = comfy.utils.load_torch_file(lora_path, safe_load=True)
+            self.loaded_lora = (lora_path, lora)
+
+        key_map = {}
+        if model is not None:
+            key_map = comfy.lora.model_lora_keys_unet(model.model, key_map)
+        if clip is not None:
+            key_map = comfy.lora.model_lora_keys_clip(
+                clip.cond_stage_model, key_map)
+
+        lora = comfy.lora_convert.convert_lora(lora)
+        loaded = comfy.lora.load_lora(lora, key_map)
+
+        for k, v in loaded.items():
+            x = v[1][0]
+            loaded[k] = ('lora', (bending_module(x), *v[1][1:]))
+
+        if model is not None:
+            new_modelpatcher = copy.deepcopy(model)  # model.clone()
+            k = new_modelpatcher.add_patches(loaded, strength_model=1)
+        else:
+            k = ()
+            new_modelpatcher = None
+
+        if clip is not None:
+            new_clip = copy.deepcopy(clip)  # clip.clone()
+            k1 = new_clip.add_patches(loaded, 1)  # strength_clip=1
+        else:
+            k1 = ()
+            new_clip = None
+        k = set(k)
+        k1 = set(k1)
+        for x in loaded:
+            if (x not in k) and (x not in k1):
+                logging.warning("NOT LOADED {}".format(x))
+
+        return (new_modelpatcher, new_clip)
+
+
 class SDModelBending:
     @classmethod
     def INPUT_TYPES(s):
@@ -229,11 +301,12 @@ class AddNoiseModelBending(BaseModelBending):
         return {
             "required": {
                 "noise_std": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0}),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff, "control_after_generate": True, "tooltip": "The random seed used for creating the noise."}),
             }
         }
 
-    def patch(self, noise_std):
-        return (AddNoiseModule(noise_std=noise_std), )
+    def patch(self, noise_std, seed):
+        return (AddNoiseModule(noise_std=noise_std, seed=seed), )
 
 
 class AddScalarModelBending(BaseModelBending):
@@ -627,7 +700,7 @@ NODE_CLASS_MAPPINGS = {
     "Dilation Module (Bending)": DilationModelBending,
     "Sobel Module (Bending)": SobelModelBending,
 
-
+    "LoRA Bending": LoRABending,
     "Visualize Feature Map": IntermediateOutputNode,
 
     "LatentApplyOperationCFGToStep": LatentApplyBendingOperationCFG,

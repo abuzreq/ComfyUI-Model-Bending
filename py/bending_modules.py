@@ -27,10 +27,13 @@ class BendingModule(nn.Module):
 
     def forward(self, x, *args, **kwargs):
         # Check if the input is 3D (single image), and add a batch dimension if necessary.
-        batch_added = False
+        num_unsqueeze_added = 0
+        if x.ndim == 2:  # Single channel image: (H, W)
+            x = x.unsqueeze(0).unsqueeze(0)  # Convert to (1, 1, H, W)
+            num_unsqueeze_added = 2
         if x.ndim == 3:  # Single image: (C, H, W)
             x = x.unsqueeze(0)  # Convert to (1, C, H, W)
-            batch_added = True
+            num_unsqueeze_added = 1
         elif x.ndim != 4:  # Expect a 4D tensor: (B, C, H, W)
             raise ValueError(
                 f"Input tensor must be 3D or 4D, but got ndim={x.ndim}")
@@ -39,7 +42,7 @@ class BendingModule(nn.Module):
         output = self.bend(x, *args, **kwargs)
 
         # If we added a batch dimension, remove it from the output.
-        if batch_added:
+        for i in range(num_unsqueeze_added):
             output = output.squeeze(0)
         return output
 
@@ -50,12 +53,14 @@ class BendingModule(nn.Module):
 
 
 class AddNoiseModule(BendingModule):
-    def __init__(self, noise_std=1):
+    def __init__(self, noise_std=1, seed=42):
         super().__init__()
         self.noise_std = noise_std
+        self.seed = seed
 
     def bend(self, x, *args, **kwargs):
-        noise = x.new_empty(x.shape).normal_(std=self.noise_std)
+        noise = x.new_empty(x.shape).normal_(
+            mean=0, std=self.noise_std, generator=torch.manual_seed(self.seed))
 
         return x + noise
 
@@ -100,6 +105,7 @@ class RotateModule(BendingModule):
 
     def bend(self, x, *args, **kwargs):
         return operations["rotate_image"](self.angle_degrees)(x)
+
 
 class ScaleModule(BendingModule):
     def __init__(self, scale_factor=1):
