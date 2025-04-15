@@ -60,7 +60,7 @@ class AddNoiseModule(BendingModule):
 
     def bend(self, x, *args, **kwargs):
         noise = x.new_empty(x.shape).normal_(
-            mean=0, std=self.noise_std, generator=torch.manual_seed(self.seed))
+            mean=0, std=self.noise_std, generator=torch.Generator(device=x.device).manual_seed(self.seed))
 
         return x + noise
 
