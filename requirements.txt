@@ -1,2 +1,2 @@
 kornia
-sklearn
+scikit-learn
