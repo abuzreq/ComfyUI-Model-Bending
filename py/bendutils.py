@@ -145,16 +145,17 @@ def inject_module(model: nn.Module, layer_path: str, new_module: nn.Module):
     print("Updated Model Part", parent)
 
 
-def process_path(path):
+def process_path(path, extra_skips=[]):
     subclasses = ['BaseModel'] + \
         [c.__name__.split('.')[-1] for c in BaseModel.__subclasses__()]
-    skip = ["diffusion_model", "UNet2DConditionModel"]
+    skips = ["diffusion_model", "UNet2DConditionModel"]
+    skips += extra_skips
     # clean up loose dots at start or end
     start = 1 if path[0] == '.' else 0
     end = -1 if path[-1] == '.' else len(path)
     path = path[start:end]
 
-    res = [x for x in path.split('.') if x not in skip and x not in subclasses]
+    res = [x for x in path.split('.') if x not in skips and x not in subclasses]
     return res[0] if len(res) == 1 else '.'.join(res)
 
 

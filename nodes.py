@@ -36,9 +36,16 @@ class IntermediateOutputNode:
             "required": {
                 "model": ("MODEL",),        # A PyTorch model.
                 "layer_path": ("STRING",),  # e.g. "features.1"
-                "input": ("LATENT",),       # Input tensor for the model.
                 "timestep": ("FLOAT", {"default": 0.0}),
+                "noise_seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff, "control_after_generate": True}),
 
+                # Input tensor for the model.
+                "latent_image": ("LATENT",),
+                "cfg": ("FLOAT", {"default": 8.0, "min": 0.0, "max": 100.0, "step": 0.01, "round": 0.01}),
+                "positive": ("CONDITIONING", ),
+                "negative": ("CONDITIONING", ),
+                "sampler": ("SAMPLER", ),
+                "sigmas": ("SIGMAS", ),
             }
         }
     RETURN_TYPES = ("IMAGE", "IMAGE")
@@ -49,7 +56,30 @@ class IntermediateOutputNode:
 
     DESCRIPTION = "Runs the UNet of the model and outputs the final results (i.e. denoising results given timestep) as well as the feature map (aggregated) for the chosen layer."
 
-    def process(self, model, layer_path, input, timestep):
+    def sample(self, model, add_noise, noise_seed, cfg, positive, negative, sampler, sigmas, latent_image):
+        latent = latent_image
+        latent_image = latent["samples"]
+        latent = latent.copy()
+        latent_image = comfy.sample.fix_empty_latent_channels(
+            model, latent_image)
+        latent["samples"] = latent_image
+
+        if not add_noise:
+            noise = Noise_EmptyNoise().generate_noise(latent)
+        else:
+            noise = Noise_RandomNoise(noise_seed).generate_noise(latent)
+
+        noise_mask = None
+        if "noise_mask" in latent:
+            noise_mask = latent["noise_mask"]
+
+        samples = comfy.sample.sample_custom(model, noise, cfg, sampler, sigmas, positive, negative,
+                                             latent_image, noise_mask=noise_mask, callback=None, disable_pbar=True, seed=noise_seed)
+        out = latent.copy()
+        out["samples"] = samples
+        return (out, out)
+
+    def process(self, model, layer_path, timestep, noise_seed, latent_image, cfg, positive, negative, sampler, sigmas):
         m = copy.deepcopy(model)
         device = torch.device(
             "cuda") if torch.cuda.is_available() else torch.device("cpu")
@@ -58,9 +88,11 @@ class IntermediateOutputNode:
         mod_path = "" if layer_path == None or layer_path == "" else process_path(
             layer_path)
         intermediate = {}
+        intermediate['output'] = []
         if mod_path != "":
             def hook(module, inputs, output):
-                intermediate['output'] = output
+                # replace with intermediate['output'].append(output) to visualize feature maps across all timesteps.
+                intermediate['output'] = [output]
 
             # Navigate to the target module using the layer_path.
             parts = mod_path.split('.')
@@ -75,19 +107,13 @@ class IntermediateOutputNode:
             handle = target_module.register_forward_hook(hook)
 
         # Preparing inputs for the model.
-        x = input["samples"]
-        batch_size = x.shape[0]
-        timesteps = torch.tensor(
-            [timestep] * batch_size, device=device, dtype=m.model_dtype())
-        c_crossattn = torch.zeros(
-            batch_size, 77, 768, device=device, dtype=m.model_dtype())
-        x = x.type(m.model_dtype()).to(device=device)
 
+        batch_size = latent_image["samples"].shape[0]
         # forward pass to get the intermediate output
         with torch.no_grad():
-            final_output = m.model.apply_model(
-                x, timesteps, c_crossattn=c_crossattn)  # , transformer_options=topt
-
+            final_output = self.sample(m, True, noise_seed, cfg, positive,
+                                       negative, sampler, sigmas, latent_image)  # Triggers the hook
+            final_output = final_output[0]["samples"]
             print("final_output", final_output.shape)
 
         # Remove the hook.
@@ -99,18 +125,22 @@ class IntermediateOutputNode:
         intermediate_outputs = intermediate.get('output', None)
         if intermediate_outputs is not None:
             feature_maps = []
-            for i in range(0, intermediate_outputs.shape[0]):
-                iout = intermediate_outputs[i]
-                gray_scale = torch.sum(iout, 0)
-                gray_scale = gray_scale / iout.shape[0]
-                gray_scale = gray_scale.unsqueeze(0).unsqueeze(0)
-                repeated_gray_scale = gray_scale.permute(
-                    0, 2, 3, 1).repeat(1, 1, 1, 4)
-                feature_maps.append(repeated_gray_scale)
+            for i in range(0, len(intermediate_outputs)):
+                
+                one_step_output = intermediate_outputs[i]
+                for j in range(0, one_step_output.shape[0]):
+                    iout = one_step_output[j]
+                    gray_scale = torch.sum(iout, 0)
+                    gray_scale = gray_scale / iout.shape[0]
+                    gray_scale = gray_scale.unsqueeze(0).unsqueeze(0)
+                    repeated_gray_scale = gray_scale.permute(
+                        0, 2, 3, 1).repeat(1, 1, 1, 4)
+                    feature_maps.append(repeated_gray_scale)
 
-            combined_features = torch.cat(feature_maps, dim=0)
+                combined_features = torch.cat(feature_maps, dim=0)
 
-        return (final_output.permute(0, 2, 3, 1),   combined_features,)
+        return (final_output.permute(0, 2, 3, 1),   combined_features)
+
 
 class ShowModelStructure:
     @classmethod
@@ -130,11 +160,11 @@ class ShowModelStructure:
 
         tree = None
         if (hasattr(model, "model")):
-            # If the model has a .model attribute, use it    
+            # If the model has a .model attribute, use it
             tree = get_model_tree(model.model)
-        elif hasattr(model, "stream"): # to accomodate stream diffusion models
+        elif hasattr(model, "stream"):  # to accomodate stream diffusion models
             tree = get_model_tree(model.stream.unet)
-        
+
         if tree is None:
             raise ValueError("Model structure not found.")
         else:
@@ -144,6 +174,36 @@ class ShowModelStructure:
             # with open('data.json', 'w', encoding='utf-8') as f:
             #    json.dump(tree, f, ensure_ascii=False, indent=4)
             return (path_placeholder, model)
+
+    # @classmethod
+    # def IS_CHANGED(self, model, path_placeholder):
+    #    return hash(str(model.model))
+
+
+class ShowVAEModelStructure:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "vae": ("VAE",),
+                "path_placeholder": ("STRING",)
+            }
+        }
+    RETURN_TYPES = ("STRING", "VAE")
+    FUNCTION = "show"
+    CATEGORY = "model_bending"
+    DESCRIPTION = "Pick a layer by clicking on it in this inspector."
+
+    def show(self, vae, path_placeholder):
+        tree = get_model_tree(vae.patcher.model)
+
+        if tree is None:
+            raise ValueError("Model structure not found.")
+        else:
+            PromptServer.instance.send_sync("model_bending.inspect_model", {
+                                            "tree": json.dumps(tree)})
+
+            return (path_placeholder, vae)
 
     # @classmethod
     # def IS_CHANGED(self, model, path_placeholder):
@@ -219,6 +279,7 @@ class LoRABending:
 
         return (new_modelpatcher, new_clip)
 
+
 class NoiseVariations:
     @classmethod
     def INPUT_TYPES(s):
@@ -232,6 +293,7 @@ class NoiseVariations:
     FUNCTION = "patch"
     CATEGORY = "model_bending"
     DESCRIPTION = ""
+
     def patch(self, input, scale):
         # Create a random noise tensor with the same shape as the input
         noise = torch.randn_like(input["samples"]) * scale
@@ -241,6 +303,7 @@ class NoiseVariations:
 
         return (input,)
 
+
 class Noise_EmptyNoise:
     def __init__(self):
         self.seed = 0
@@ -248,7 +311,8 @@ class Noise_EmptyNoise:
     def generate_noise(self, input_latent):
         latent_image = input_latent["samples"]
         return torch.zeros(latent_image.shape, dtype=latent_image.dtype, layout=latent_image.layout, device="cpu")
-    
+
+
 class Noise_RandomNoise:
     def __init__(self, seed):
         self.seed = seed
@@ -259,96 +323,126 @@ class Noise_RandomNoise:
         return comfy.sample.prepare_noise(latent_image, self.seed, batch_inds)
 
 
+def select_center_child(middle_block):
+    children = list(middle_block.children())
+    num_children = len(children)
+
+    if num_children == 1:
+        return children[0]  # pick the only child ("0")
+    elif num_children == 2:
+        return children[1]  # pick the second ("1")
+    elif num_children == 3:
+        return children[1]  # pick the middle child ("1")
+    else:
+        raise ValueError(f"Unexpected number of children ({num_children}).")
+
+
 class PCAPrep:
     @classmethod
     def INPUT_TYPES(s):
         return {
             "required":
-                    {"model": ("MODEL",),
-                    "cfg": ("FLOAT", {"default": 8.0, "min": 0.0, "max": 100.0, "step":0.1, "round": 0.01}),
-                    "positive": ("CONDITIONING", ),
-                    "negative": ("CONDITIONING", ),
-                    "sampler": ("SAMPLER", ),
-                    "sigmas": ("SIGMAS", ),
-                    "latent_image": ("LATENT", ),
+            {"model": ("MODEL",),
+             "cfg": ("FLOAT", {"default": 8.0, "min": 0.0, "max": 100.0, "step": 0.01, "round": 0.01}),
+             "positive": ("CONDITIONING", ),
+             "negative": ("CONDITIONING", ),
+             "sampler": ("SAMPLER", ),
+             "sigmas": ("SIGMAS", ),
+             "latent_image": ("LATENT", ),
 
-                    "n_batches": ("INT", {"default": 1, "min": 1, "max": 100}),
-                     }
-                }
-    
-    RETURN_TYPES = ("LATENT",)
+             "n_batches": ("INT", {"default": 1, "min": 1, "max": 100}),
+             }
+        }
+
+    RETURN_TYPES = ("LATENT", "LATENT")
+    RETURN_NAMES = ("PCS", "Samples")
+
     FUNCTION = "patch"
     CATEGORY = "model_bending"
-    DESCRIPTION = ""
-        
+    DESCRIPTION = "Computes the principal components of the h-space of the model. This is used to bend the model in specific semantic directions."
+    EXPERIMENTAL = True
+
     def extract_h_spaces(self, m, cfg, positive, negative, sampler, sigmas, latent_image, device, n_batches):
         m.model = m.model.to(device=device)
-       
-
         '''Extract h-space representations for use in PCA'''
         h_space = []
+        outputs = []
 
         def get_h_space(module, inp, output):
-            print("hook", module.__class__.__name__, output.shape)
             # Save a detached copy of output from the middle block
             h_space[-1].append(output.detach().cpu())
+            # print("hook", module.__class__.__name__, len(h_space))
 
         # Register the forward hook on middle_block
-        hook = getattr(m.model.diffusion_model.middle_block, "1").register_forward_hook(get_h_space)
-
-        # Next: pass in a latent sample and move it along direction of user choice
+        center_block_in_mid = select_center_child(
+            m.model.diffusion_model.middle_block)
+        hook = center_block_in_mid.register_forward_hook(get_h_space)
         try:
             with torch.no_grad():
                 for i in trange(n_batches, desc="Extracting h-space batches"):
                     h_space.append([])
-                    self.sample(m, True, i, cfg, positive, negative, sampler, sigmas, latent_image, )  # Triggers the hook
+                    o = self.sample(m, True, i, cfg, positive, negative,
+                                    sampler, sigmas, latent_image, )  # Triggers the hook
+                    outputs.append(o[0])
         finally:
             hook.remove()
 
-        # stack and flatten
-        h_space_tensor = torch.cat([torch.stack(batch, dim=0) for batch in h_space], dim=0)
+        # stack and flatten before passing to PCA
+        h_space_tensor = torch.cat(
+            [torch.stack(batch, dim=1) for batch in h_space])
         flat = h_space_tensor.view(h_space_tensor.size(0), -1)
-        return flat.numpy(), h_space_tensor.shape[1:]  # also return shape for reshaping PCs
-    
+
+        # also return shape for reshaping PCs
+        return flat.numpy(), h_space_tensor.shape[1:], outputs
+
     def sample(self, model, add_noise, noise_seed, cfg, positive, negative, sampler, sigmas, latent_image):
-            latent = latent_image
-            latent_image = latent["samples"]
-            latent = latent.copy()
-            latent_image = comfy.sample.fix_empty_latent_channels(model, latent_image)
-            latent["samples"] = latent_image
-           
-            if not add_noise:
-                noise = Noise_EmptyNoise().generate_noise(latent)
-            else:
-                noise = Noise_RandomNoise(noise_seed).generate_noise(latent)
+        latent = latent_image
+        latent_image = latent["samples"]
+        latent = latent.copy()
+        latent_image = comfy.sample.fix_empty_latent_channels(
+            model, latent_image)
+        latent["samples"] = latent_image
 
-            noise_mask = None
-            if "noise_mask" in latent:
-                noise_mask = latent["noise_mask"]
+        if not add_noise:
+            noise = Noise_EmptyNoise().generate_noise(latent)
+        else:
+            noise = Noise_RandomNoise(noise_seed).generate_noise(latent)
 
-            samples = comfy.sample.sample_custom(model, noise, cfg, sampler, sigmas, positive, negative, latent_image, noise_mask=noise_mask, callback=None, disable_pbar=True, seed=noise_seed)
-            out = latent.copy()
-            out["samples"] = samples
-            return (out, out)
-    
+        noise_mask = None
+        if "noise_mask" in latent:
+            noise_mask = latent["noise_mask"]
+
+        samples = comfy.sample.sample_custom(model, noise, cfg, sampler, sigmas, positive, negative,
+                                             latent_image, noise_mask=noise_mask, callback=None, disable_pbar=True, seed=noise_seed)
+        out = latent.copy()
+        out["samples"] = samples
+        return (out, out)
+
     def patch(self, model, cfg, positive, negative, sampler, sigmas, latent_image, n_batches):
-    
+
         device = torch.device(
             "cuda") if torch.cuda.is_available() else torch.device("cpu")
-        
-        flat_data, feature_shape = self.extract_h_spaces(model, cfg, positive, negative, sampler, sigmas, latent_image, device, n_batches)
-       
-        # Apply PCA      
+
+        flat_data, feature_shape, outputs = self.extract_h_spaces(
+            model, cfg, positive, negative, sampler, sigmas, latent_image, device, n_batches)
+
+        # Apply PCA
         scaler = StandardScaler()
-        n_components = 10
+        n_components = min(10, n_batches)
         pca = PCA(n_components=n_components)
         pca.fit(scaler.fit_transform(flat_data))
-        pcs = torch.tensor(pca.components_, dtype=model.model_dtype(), device=device)
-        pcs = pcs.view(n_components, *feature_shape)  # dynamic shape
+        pcs = torch.tensor(
+            pca.components_, dtype=model.model_dtype(), device=device)
 
-        modified_input = copy.deepcopy(latent_image)
-        modified_input["samples"] = pcs
-        return (modified_input, )
+        pcs = pcs.view(n_components, *feature_shape)  # dynamic shape
+        print("PCS Shape", pcs.shape)
+        pcs_obj = {"samples": pcs}
+
+        combined_tensor = torch.cat([obj["samples"] for obj in outputs], dim=0)
+        combined_object = {"samples": combined_tensor}
+
+        return (pcs_obj, combined_object, )
+
 
 class HBending:
     @classmethod
@@ -356,7 +450,7 @@ class HBending:
         return {
             "required": {
                 "model": ("MODEL",),
-                "pca": ("LATENT", ),
+                "pcs": ("LATENT", ),
                 "direction": ("INT", {"default": 0, "min": 0, "max": 9}),
                 "scale": ("FLOAT", {"default": 1.0}),
             }
@@ -365,22 +459,27 @@ class HBending:
     RETURN_TYPES = ("MODEL",)
     FUNCTION = "patch"
     CATEGORY = "model_bending"
+    EXPERIMENTAL = True
+    DESCRIPTION = "Bends the model in the direction of the principal component (pcs). The direction is the index of the principal component. The scale is multiplied by the principal component."
 
-    def patch(self, model, pca, direction, scale):
+    def patch(self, model, pcs, direction, scale):
         m = copy.deepcopy(model)
-       
+
         def hook_project(module, inp, output):
-            # Save a detached copy of output from the middle block
-            output = output +  pca["samples"][direction] * scale
-            return output
-        
-        # check if module has hook first.
+            change = pcs["samples"][direction, module.step, :, :, :] * scale
+            module.step += 1
+            return output + change.unsqueeze(0)
+
+        # mod = select_center_child(m.model.diffusion_model.middle_block)
         mod = getattr(m.model.diffusion_model.middle_block, "1")
+        mod.step = 0
+
         if getattr(mod, "hspace_hook", None) is not None:
             mod.hspace_hook.remove()
         setattr(mod, "hspace_hook", mod.register_forward_hook(hook_project))
-    
+
         return (m, )
+
 
 class SDModelBending:
     @classmethod
@@ -425,7 +524,6 @@ class SDModelBending:
         return (m, )
 
 
-    
 class CustomModelBending:
     @classmethod
     def INPUT_TYPES(s):
@@ -449,14 +547,14 @@ class CustomModelBending:
         All BaseModel's have the property .diffusion_model as well
         '''
         mod_path = "" if path == None or path == "" else process_path(path)
-        
+
         module = None
         if (hasattr(m, "model")):
-            # If the model has a .model attribute, use it    
+            # If the model has a .model attribute, use it
             module = m.model.diffusion_model
         elif hasattr(m, "stream"):
             module = m.stream.unet
-        
+
         hook_module(module, mod_path, bending_module)
         return (m, )
 
@@ -533,7 +631,7 @@ class RotateModelBending(BaseModelBending):
     def INPUT_TYPES(s):
         return {
             "required": {
-                "angle_degrees": ("FLOAT", {"default": 0.0, "min": -360, "max": 360, "step": 1}),
+                "angle_degrees": ("FLOAT", {"default": 0.0, "min": -360, "max": 360, "step": 0.01}),
             }
         }
 
@@ -693,7 +791,7 @@ class LatentOperationMultiplyScalar(BaseLatentOperation):
     def INPUT_TYPES(s):
         return {
             "required": {
-                "scalar": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step": 0.5}),
+                "scalar": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step": 0.01}),
             }
         }
 
@@ -826,9 +924,11 @@ class CustomModuleVAEBending:
     DESCRIPTION = "Bends a VAE model by injecting a module at the specified path."
 
     def patch(self, vae, path, bending_module):
-
         m = copy.deepcopy(vae)
-        hook_module(m.patcher.model, path, bending_module)
+        mod_path = "" if path == None or path == "" else process_path(
+            path, ["AutoencoderKL", "TAESD"])
+
+        hook_module(m.patcher.model, mod_path, bending_module)
         return (m, )
 
 
@@ -862,7 +962,7 @@ class ConditioningApplyOperation:
 
 # Finally, let ComfyUI know about the node:
 NODE_CLASS_MAPPINGS = {
-    "PCAPrep": PCAPrep,
+    "Compute PCA": PCAPrep,
     "HSpace Bending": HBending,
 
     "NoiseVariations": NoiseVariations,
@@ -872,6 +972,7 @@ NODE_CLASS_MAPPINGS = {
     "Model Bending (SD Layers)": SDModelBending,
     "Model VAE Bending": CustomModuleVAEBending,
     "Model Inspector": ShowModelStructure,
+    "Model VAE Inspector": ShowVAEModelStructure,
 
     "Add Noise Module (Bending)": AddNoiseModelBending,
     "Add Scalar Module (Bending)": AddScalarModelBending,

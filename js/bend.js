@@ -7,7 +7,7 @@ app.registerExtension({
         function messageHandler(event) {
             // When the model is loaded we grab it's structure from the backend and visualize it
             for (var n of app.graph._nodes) {
-                if (n.title === "Model Inspector") {
+                if (n.title === "Model Inspector" || n.title === "Model VAE Inspector") {
                     let treeData = convertJSONTree(
                         JSON.parse(event.detail.tree),
                         undefined,
@@ -21,9 +21,11 @@ app.registerExtension({
 
                     if (hasChanged) {
                         n.modelViz.treeData = treeData;
+                        n.modelViz.typeSet = undefined; // Reset the typeSet to force recomputation
                         n.modelViz.renderTree(); // Call the renderTree method to update the visualization
                     }
                 }
+                
             }
         }
 
@@ -48,7 +50,7 @@ app.registerExtension({
     },
 
     nodeCreated(node, app) {
-        if (node.title === "Model Inspector") {
+        if (node.title === "Model Inspector" || node.title === "Model VAE Inspector") {
             const placeholderWidget = node.widgets.find(
                 (w) => w.name === "path_placeholder"
             );
@@ -75,7 +77,8 @@ app.registerExtension({
                     node.modelViz.canvas = ctx.canvas;
                     node.modelViz.renderTree();
                 }
-            };
+            };          
+  
         } else if (node.title === "Latent Operation (Custom)") {
             // Locate the operation widget and other parameter widgets by name
             const operationWidget = node.widgets.find(
@@ -168,6 +171,7 @@ class ModelViz {
         this.treeData = treeData;
         console.log(this.ctx, this.canvas, this.app);
 
+
         // Initial render of the tree view.
         this.renderTree();
 
@@ -179,10 +183,6 @@ class ModelViz {
             const clickY =
                 event.canvasY - this.comfynode._pos[1] - this.offsetYInNode;
 
-            for (const item of this.visibleNodes) {
-                const { node, depth, y } = item;
-                node.selected = false;
-            }
             for (const item of this.visibleNodes) {
                 const { node, depth, y } = item;
 
@@ -204,6 +204,12 @@ class ModelViz {
                     clickY >= region.y &&
                     clickY <= region.y + region.height
                 ) {
+                                console.log("click", event,this.canvas)
+                    for (const item of this.visibleNodes) {
+                        const { node, depth, y } = item;
+                        node.selected = false;
+                    }
+
                     // Toggle the collapsed state and re-render.
                     this.comfynode.setOutputData(0, node.path);
                     var pathPlaceholder = this.comfynode.widgets.find(
@@ -253,6 +259,24 @@ class ModelViz {
         this.renderTree();
     }
 
+    processNodeTypes(node, typeSet = new Set()) {
+      
+        if (node && node.type) {
+            typeSet.add(node.type);
+            if (node.children) {
+                for (const child of node.children) {
+                    typeSet.add(child.type);
+                    this.processNodeTypes(
+                        child,
+                        typeSet
+                    );
+                }
+            }
+        }
+    }
+
+
+
     /**
      * Renders the tree on the canvas.
      */
@@ -267,7 +291,42 @@ class ModelViz {
         if (!this.treeData) {
             return;
         }
+        else 
+        {
+            if (this.typeSet == undefined) {
+                this.typeSet = new Set();
+                this.processNodeTypes(this.treeData, this.typeSet)
+                console.log(this.typeSet);
+        
+                //https://sashamaps.net/docs/resources/20-colors/
+                //var colorMap = ['#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe', '#008080', '#e6beff', '#9a6324', '#fffac8', '#800000', '#aaffc3', '#808000', '#ffd8b1', '#000075', '#808080', '#ffffff', '#000000'];
+                // https://gist.github.com/Myndex/997244b95d84788df96f4aab8b9edeb1
+                var colorMap = [
+                    '#fdfdfd', '#1d1d1d', '#ebce2b', '#702c8c',
+                    '#db6917', '#96cde6', '#96cde6', '#ba1c30',
+                    '#c0bd7f', '#7f7e80', '#7f7e80', '#5fa641',
+                    '#d485b2', '#d485b2', '#4277b6', '#df8461',
+                    '#df8461', '#df8461', '#df8461', '#463397',
+                    '#463397', '#463397', '#e1a11a', '#e1a11a',
+                    '#e1a11a', '#91218c', '#91218c', '#91218c',
+                    '#e8e948', '#e8e948', '#e8e948', '#7e1510',
+                    '#7e1510', '#92ae31', '#92ae31', '#92ae31',
+                    '#6f340d', '#6f340d', '#6f340d', '#d32b1e',
+                    '#d32b1e', '#d32b1e', '#2b3514', '#2b3514',
+                    '#2b3514'
+                  ]
+                
+                this.typesToColorMap = {};
+                [...this.typeSet].forEach((type, index) => {
+                    this.typesToColorMap[type] = colorMap[index % colorMap.length];
+                 
+                });
+            }
+        }
+
         this.computeVisibleNodes(this.treeData, 0, 0, this.visibleNodes);
+       
+        // Draw the tree nodes
 
         this.visibleNodes.forEach((item) => {
             const { node, depth, y } = item;
@@ -275,6 +334,9 @@ class ModelViz {
             var ny = y + this.offsetYInNode;
             // Optional: draw a white background for clarity.
             this.ctx.fillStyle = "#fff";
+
+            // this.ctx.fillStyle = node.type in this.typesToColorMap && !node.children? this.typesToColorMap[node.type]: '#fff'; 
+
             this.ctx.fillRect(
                 0,
                 ny,
