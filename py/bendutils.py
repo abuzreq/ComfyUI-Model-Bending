@@ -173,6 +173,45 @@ def get_model_tree(module):
 
     return tree
 
+def get_conv2d_leaf_paths(module: nn.Module, prefix=''):
+    conv_paths = []
+    for name, child in module.named_children():
+        path = f"{prefix}.{name}" if prefix else name
+        if isinstance(child, nn.Conv2d) and len(list(child.children())) == 0:
+            conv_paths.append(path)
+        else:
+            conv_paths.extend(get_conv2d_leaf_paths(child, path))
+    return conv_paths
+
+def get_leaf_paths(module, prefix=''):
+    paths = []
+    for name, child in module.named_children():
+        path = f"{prefix}.{name}" if prefix else name
+        # If the child has no children, it's a leaf
+        if len(list(child.children())) == 0:
+            paths.append(path)
+        else:
+            paths.extend(get_leaf_paths(child, path))
+    return paths
+
+def get_conv2d_leaf_paths_with_types(module: nn.Module, prefix='', type_prefix=''):
+    named_paths = []
+    type_paths = []
+    
+    for name, child in module.named_children():
+        name_path = f"{prefix}.{name}" if prefix else name
+        type_name = child.__class__.__name__
+        type_path = f"{type_prefix}.{type_name}" if type_prefix else type_name
+
+        if isinstance(child, nn.Conv2d) and len(list(child.children())) == 0:
+            named_paths.append(name_path)
+            type_paths.append(type_path)
+        else:
+            child_named, child_types = get_conv2d_leaf_paths_with_types(child, name_path, type_path)
+            named_paths.extend(child_named)
+            type_paths.extend(child_types)
+    
+    return named_paths, type_paths
 
 def set_sampling_rate(sr):
     global SAMPLING_RATE
@@ -711,7 +750,6 @@ def rotate_image(degrees):
             (B,), degrees, device=x.device, dtype=x.dtype)
         return KT.rotate(x, angle=angle_tensor)
     return fn
-
 
 def scale_image(scale_factor):
     def fn(x):

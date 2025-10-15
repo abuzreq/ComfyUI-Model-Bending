@@ -4,7 +4,15 @@ from .bendutils import operations
 
 # ------------------- Bending classes-----------------------
 
+class AddNoiseModule(nn.Module):
+    def __init__(self, noise_std=1):
+        super().__init__()
+        self.noise_std = noise_std
 
+    def forward(self, x, *args, **kwargs):
+        noise = x.new_empty(x.shape).normal_(std=self.noise_std)
+        return x + noise
+    
 class BendingModule(nn.Module):
     '''
     Base class for all bending operations, mainly to perform some pre and post processing on the results. Specifically, to ensure the input's shape aligns coming in and going out.
