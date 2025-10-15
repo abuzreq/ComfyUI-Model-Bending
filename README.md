@@ -1,5 +1,5 @@
 # Diffusion Model Bending
-This project implements [model bending](https://github.com/terrybroad/network-bending) techniques for diffusion models in ComfyUI. Model bending allows you to apply transformations to the inner workings of your model in order to push it towards new and diverse aesthetics. You can see it as providing granular controls for introducing diversity and randomization beyond your simple randomization seeds. Transformations can include addition, multiplication, noise, rotation, erosion, dilation, to name a few, ... or even your own custom ones.
+This project implements [model bending](https://github.com/terrybroad/network-bending) techniques for diffusion models in ComfyUI. Model bending allows you to apply transformations to the inner workings of your model in order to push it towards new and diverse aesthetics. You can see it as providing granular controls for introducing diversity and randomization beyond your simple randomization seeds. Transformations can include addition, multiplication, noise, rotation, erosion, dilation, to name a few.
 
 This project provides multiple ways to achieve bending:
 ### 1. Model Bending: [[Workflow](workflows/basic_unet_bending.json)]
