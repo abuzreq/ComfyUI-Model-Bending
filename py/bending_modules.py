@@ -12,7 +12,65 @@ class AddNoiseModule(nn.Module):
     def forward(self, x, *args, **kwargs):
         noise = x.new_empty(x.shape).normal_(std=self.noise_std)
         return x + noise
+
+class ApplyToRandomSubsetModule(nn.Module):
+    def __init__(self, module, percentage=0.5, seed=None, dim="batch"):
+        super().__init__()
+        self.module = module
+        self.percentage = percentage
+        self.seed = seed
+        self.dim = dim
+
+    def forward(self, x, *args, **kwargs):
+
+        if self.percentage == 0 or self.percentage == 1.0:
+            return x
+        
+        B, C, H, W = x.shape
+        out = x.clone() 
+
+        # ======================================================
+        # 1️⃣ Batch subset: choose random subset of images
+        # ======================================================
+        if self.dim == "batch":
+            n = B
+            subset_size = int(n * self.percentage)
+            idx = torch.randperm(n, generator=torch.Generator().manual_seed(self.seed))[:subset_size]
+            out[idx] = self.module(x[idx], *args, **kwargs)
+            return out
+
+        # ======================================================
+        # 2️⃣ Channel subset: choose random subset of channels
+        # ======================================================
+        elif self.dim == "channel":
+            n = C
+            subset_size = int(n * self.percentage)
+            idx = torch.randperm(n, generator=torch.Generator().manual_seed(self.seed))[:subset_size]
+            out[:, idx] = self.module(x[:, idx], *args, **kwargs)
+            return out
+
+        # ======================================================
+        # 3️⃣ Spatial subset: choose random spatial positions
+        # ======================================================
+        elif self.dim == "spatial":
+            num_pixels = H * W
+            subset_size = int(num_pixels * self.percentage)
+
+            flat_idx = torch.randperm(num_pixels, generator=torch.Generator().manual_seed(self.seed))[:subset_size]
+            rows = flat_idx // W
+            cols = flat_idx % W
+            mask = torch.zeros(H, W, dtype=torch.bool, device=x.device)
+            mask[rows, cols] = True
+            mask = mask.unsqueeze(0).unsqueeze(0).expand(B, C, -1, -1)
+
+            transformed = self.module(x, *args, **kwargs)
+            out = torch.where(mask, transformed, x)
+            return out
+
+        else:
+            raise ValueError(f"Unsupported dimension mode: {self.dim}")   
     
+ 
 class BendingModule(nn.Module):
     '''
     Base class for all bending operations, mainly to perform some pre and post processing on the results. Specifically, to ensure the input's shape aligns coming in and going out.
@@ -46,8 +104,14 @@ class BendingModule(nn.Module):
             raise ValueError(
                 f"Input tensor must be 3D or 4D, but got ndim={x.ndim}")
 
-        # Delegate the transformation to the child class using a separate method.
-        output = self.bend(x, *args, **kwargs)
+        # only apply bending to the specified denoising steps
+        if (self.current_step != None and self.steps_to_bend != None):
+            if self.current_step in self.steps_to_bend:
+                output = self.bend(x, *args, **kwargs)
+            else: 
+                output = x
+        else:
+            output = self.bend(x, *args, **kwargs)
 
         # If we added a batch dimension, remove it from the output.
         for i in range(num_unsqueeze_added):

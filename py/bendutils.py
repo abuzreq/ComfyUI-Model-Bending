@@ -1018,8 +1018,61 @@ def scale(r1, r2):
     return fn
 
 
+
+def parse_step_str_to_ranges(s, max_steps=1000):
+    default_value = None
+    if not isinstance(s, str):
+        return default_value
+
+    s = s.strip()
+    if not s or s == "*":
+        return default_value
+
+    result = set()
+    s_nospace = s.replace(" ", "")
+    parts = s_nospace.split(",")
+
+    try:
+        for p in parts:
+            if "-" in p:
+                left, right = p.split("-")
+
+                # "-X" => 0..X
+                if left == "":
+                    end = int(right)
+                    result.update(range(0, min(end, max_steps) + 1))
+
+                # "X-" => X..max_steps
+                elif right == "":
+                    start = int(left)
+                    result.update(range(max(start, 0), max_steps + 1))
+
+                # "X-Y" => X..Y
+                else:
+                    start = int(left)
+                    end = int(right)
+                    if start <= end:
+                        result.update(range(max(start, 0), min(end, max_steps) + 1))
+                    else:
+                        raise ValueError("Invalid range order")
+
+            else:
+                # Single number
+                num = int(p)
+                if 0 <= num <= max_steps:
+                    result.add(num)
+                else:
+                    raise ValueError("Number out of bounds")
+
+    except Exception:
+        # On ANY parsing error -> treat as "*"
+        return default_value
+
+    return sorted(result) if result else default_value
+
 # Define the functions that will be used in the latent bending operations
 operations = {
+    "parse_step_str_to_ranges": parse_step_str_to_ranges,
     "add_full": add_full,
     "add_sparse": add_sparse,
     "add_noise": add_noise,

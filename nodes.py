@@ -9,8 +9,7 @@ from server import PromptServer
 import folder_paths
 
 import logging
-from .py.custom_code_module import CodeNode
-from .py.bendutils import operations, inject_module, hook_module, get_model_tree, process_path
+from .py.bendutils import operations, inject_module, hook_module, get_model_tree, process_path, parse_step_str_to_ranges
 from .py.bending_modules import *
 
 from sklearn.decomposition import PCA
@@ -125,8 +124,7 @@ class IntermediateOutputNode:
         intermediate_outputs = intermediate.get('output', None)
         if intermediate_outputs is not None:
             feature_maps = []
-            for i in range(0, len(intermediate_outputs)):
-                
+            for i in range(0, len(intermediate_outputs)):       
                 one_step_output = intermediate_outputs[i]
                 for j in range(0, one_step_output.shape[0]):
                     iout = one_step_output[j]
@@ -531,22 +529,39 @@ class CustomModelBending:
             "required": {
                 "model": ("MODEL",),
                 "bending_module": ("BENDING_MODULE", ),
-                "path": ("STRING",),
-            }
-
-        }
+                "path": ("STRING", {"default": "", "tooltip": "the path to the layer to be bent, e.g. 'input_blocks.1.0.out_layers.3' you can apply it to multiple paths by seperating them with a comma 'path1, path2' "}),
+            }, "optional": {
+                "steps_to_bend_str": ("STRING", {"default": "*", "tooltip": (
+                    "Specify which steps (in the denoising process) to apply bending to.\n\n"
+                    "Examples:\n"
+                    "  *        → all timesteps\n"
+                    "  1,2,5    → discrete steps\n"
+                    "  1-5      → range (inclusive)\n"
+                    "  1,3-6    → mixed single + range\n"
+                    "  -3       → 0 to 3\n"
+                    "  50-      → 50 to max_steps\n"
+                    "\n"
+                    "Any invalid input defaults to '*'."
+                )}), "max_denoising_steps": ("INT", {"default": "200", "tooltip":"the maximum for the steps_to_bend_str, the default is a 100 to work with most diffusion models, but it should ideally be the same as the num steps of your scheduler."})
+                },
+    }
     RETURN_TYPES = ("MODEL",)
     FUNCTION = "patch"
     CATEGORY = "model_bending"
 
-    def patch(self, model, bending_module, path):
+    def patch(self, model, bending_module, path, steps_to_bend_str, max_denoising_steps):
         m = copy.deepcopy(model)
         '''
         All ModelPatcher instances have a .model property that is an instance of BaseModel.
         All models in comfy/model_base.py extend BaseModel. These include SDXL, Flux, Hunyuan, PixArt ...
         All BaseModel's have the property .diffusion_model as well
         '''
-        mod_path = "" if path == None or path == "" else process_path(path)
+        if not path or path == 'False' or not isinstance(path, str):
+            print("[CustomModelBending] No path provided.")
+            return (model,)
+
+        # Split by commas first to allow multiple paths
+        split_paths = [p.strip() for p in path.split(',') if p.strip()]
 
         module = None
         if (hasattr(m, "model")):
@@ -555,7 +570,26 @@ class CustomModelBending:
         elif hasattr(m, "stream"):
             module = m.stream.unet
 
-        hook_module(module, mod_path, bending_module)
+        def my_unet_wrapper(apply_model, params):
+            inp, timestep, c = params["input"], params["timestep"], params["c"]
+
+            # convert sigma → timestep
+            transformer_options = params['c'].get("transformer_options")
+            sigmas = transformer_options.get(
+                "sample_sigmas").to(device='cpu')
+            current_step = (sigmas == transformer_options["sigmas"].cpu()
+                        ).nonzero(as_tuple=True)[0]
+            # store the current denoising step num into the bending module so it could be used later to apply bending at the timesteps specified by the user through the timesteps_to_bend paramter
+            bending_module.current_step = current_step[0]
+            return apply_model(inp, timestep, **c)
+
+        m.set_model_unet_function_wrapper(my_unet_wrapper)
+
+        bending_module.steps_to_bend = parse_step_str_to_ranges(steps_to_bend_str, max_steps=max_denoising_steps)
+
+        for p in split_paths:
+            mod_path = "" if p == None or p == "" else process_path(p)
+            hook_module(module, mod_path, bending_module)
         return (m, )
 
 # ----------------------- (U-Net) Model Bending -------------------------
@@ -571,6 +605,37 @@ class BaseModelBending:
 
     def patch(self):
         pass
+
+
+class ApplyToRandomSubsetModelBending(BaseModelBending):
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "bending_module": ("BENDING_MODULE",),
+                "percentage": ("FLOAT", {
+                    "default": 0.5,
+                    "min": 0.0,
+                    "max": 1.0,
+                    "tooltip": "Fraction of tensor elements/channels/spatial positions to apply the model to."
+                }),
+                "dimension": (["batch", "channel", "spatial"], {
+                    "default": "batch",
+                    "tooltip": "Subset mode: apply per batch item, per channel, or per spatial region."
+                }),
+                "seed": ("INT", {
+                    "default": 0,
+                    "min": 0,
+                    "max": 0xffffffffffffffff,
+                    "tooltip": "Random seed for reproducibility."
+                }),
+            }
+        }
+
+    def patch(self, bending_module, percentage, dimension, seed):
+        wrapped = ApplyToRandomSubsetModule(
+            module=bending_module, percentage=percentage, seed=seed, dim=dimension)
+        return (wrapped,)
 
 
 class AddNoiseModelBending(BaseModelBending):
@@ -967,13 +1032,13 @@ NODE_CLASS_MAPPINGS = {
 
     "NoiseVariations": NoiseVariations,
     "Latent Operation To Module": LatentOperationToModule,
-    "Custom Code Module": CodeNode,
     "Model Bending": CustomModelBending,
     "Model Bending (SD Layers)": SDModelBending,
     "Model VAE Bending": CustomModuleVAEBending,
     "Model Inspector": ShowModelStructure,
     "Model VAE Inspector": ShowVAEModelStructure,
 
+    "Apply To Subset (Bending)": ApplyToRandomSubsetModelBending,
     "Add Noise Module (Bending)": AddNoiseModelBending,
     "Add Scalar Module (Bending)": AddScalarModelBending,
     "Multiply Scalar Module (Bending)": MultiplyScalarModelBending,
