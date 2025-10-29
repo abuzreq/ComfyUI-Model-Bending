@@ -105,7 +105,7 @@ class BendingModule(nn.Module):
                 f"Input tensor must be 3D or 4D, but got ndim={x.ndim}")
 
         # only apply bending to the specified denoising steps
-        if (self.current_step != None and self.steps_to_bend != None):
+        if (hasattr(self, 'current_step') and hasattr(self, 'steps_to_bend') and self.current_step != None and self.steps_to_bend != None):
             if self.current_step in self.steps_to_bend:
                 output = self.bend(x, *args, **kwargs)
             else: 

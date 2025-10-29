@@ -81,7 +81,6 @@ def hook_module(model: nn.Module, layer_path: str, new_module: nn.Module):
         
         # The with_kwargs flag lets the hook capture both positional args and keyword args.
         handle = target_module.register_forward_hook(hook, with_kwargs=True)
-        print(target_module, dir(target_module), handle)
         print(f"Registered hook on module at '{layer_path}'.")
         return handle
 
