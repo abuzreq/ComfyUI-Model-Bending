@@ -3,9 +3,11 @@
 A ComfyUI custom node that provides **model bending** for diffusion models (e.g. Stable Diffusion, Flux). Model bending is the manipulation of the model activations at different chosen parts during sampling. Useful for creating experimential variations on an output or for testing out and understanding how models work. Manipulations include include addition, multiplication, noise, rotation, erosion, and dilation, and more. Inspired by [network-bending](https://github.com/terrybroad/network-bending) of GAN models. 
 
 An example of rotating the outputs of the realisticvisionv51_v51vae model at its Unet's middle block (middle_block.2.out_layers), doing a full rotation (0-360deg).
+
 ![image](docs/imgs/bending_rotate_analog_portrait.gif)
 
 Another loop where we inject a scalar value (-10 to 30) to the middle block (middle_block.2.out_layers) of the UNet of the sd_xl_turbo model.
+
 ![image](docs/imgs/bending_add_analog_portrait.gif)
 
 This project provides:
