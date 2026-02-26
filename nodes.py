@@ -1,4 +1,5 @@
 import copy
+from typing import Optional
 import torch
 import json
 
@@ -478,6 +479,28 @@ class HBending:
 
         return (m, )
 
+# ----------------------------
+# 3) Model / module path helpers
+# ----------------------------
+
+def get_unet_from_comfy_model(m) -> Optional[nn.Module]:
+    # matches common comfy models
+    if hasattr(m, "model") and hasattr(m.model, "diffusion_model"):
+        return m.model.diffusion_model
+    if hasattr(m, "stream") and hasattr(m.stream, "unet"):
+        return m.stream.unet
+    return None
+
+
+def set_unet_on_comfy_model(m, unet: nn.Module) -> None:
+    """Set the UNet on a Comfy model (mirrors get_unet_from_comfy_model)."""
+    if hasattr(m, "model") and hasattr(m.model, "diffusion_model"):
+        m.model.diffusion_model = unet
+    elif hasattr(m, "stream") and hasattr(m.stream, "unet"):
+        m.stream.unet = unet
+
+
+
 
 class SDModelBending:
     @classmethod
@@ -504,10 +527,19 @@ class SDModelBending:
         return conv_layers
 
     def patch(self, model, bending_module, block, layer_num):
-        m = copy.deepcopy(model)
+        if not (hasattr(model, "clone") and callable(getattr(model, "clone", None))):
+            raise RuntimeError("Model has no clone() method; cannot patch for bending.")
+        m = model.clone()
+        model_unet = get_unet_from_comfy_model(model)
+        if model_unet is not None:
+            set_unet_on_comfy_model(m, copy.deepcopy(model_unet))
+
+        unet = get_unet_from_comfy_model(m)
+        if unet is None:
+            return (model,)
 
         convs = self.find_conv2d_modules(
-            getattr(m.model.diffusion_model, block))
+            getattr(unet, block))
         PromptServer.instance.send_sync("model_bending.bend_sd_model", {
                                         "num_layers": len(convs)})
 
