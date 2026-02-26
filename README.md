@@ -1,58 +1,88 @@
-# Diffusion Model Bending
-This project implements [model bending](https://github.com/terrybroad/network-bending) techniques for diffusion models in ComfyUI. Model bending allows you to apply transformations to the inner workings of your model in order to push it towards new and diverse aesthetics. You can see it as providing granular controls for introducing diversity and randomization beyond your simple randomization seeds. Transformations can include addition, multiplication, noise, rotation, erosion, dilation, to name a few.
+# ComfyUI Model Bending
 
-This project provides multiple ways to achieve bending:
-### 1. Model Bending: [[Workflow](workflows/basic_unet_bending.json)]
-Inject bending modules (torch.nn) into your models (specifically, your UNet but Comfy calls them MODEL). Plug in your model, pick or write a bending module, and choose the layer in your model where you would like to inject the bending module. The Model Inspector node is available to help you experiment with different layers. 
+A ComfyUI custom node that provides **model bending** for diffusion models (e.g. Stable Diffusion, Flux). Model bending is the manipulation of the model activations at different chosen parts during sampling. Useful for creating experimential variations on an output or for testing out and understanding how models work. Manipulations include include addition, multiplication, noise, rotation, erosion, and dilation, and more. Inspired by [network-bending](https://github.com/terrybroad/network-bending) of GAN models. 
 
-Another example of injecting an Add Scalar module to the middle block (middle_block.2.out_layers) of a UNet of the sd_xl_turbo model. Amounts added range from -10 to 30, while freezing everything else (prompt, seed, ... etc.).
-![image](docs/imgs/bending_add_analog_portrait.gif)
-
-An example of using the Rotate module to the middle block (middle_block.2.out_layers) of a UNet of the realisticvisionv51_v51vae model, doing a full rotation (0-360deg).
+An example of rotating the outputs of the realisticvisionv51_v51vae model at its Unet's middle block (middle_block.2.out_layers), doing a full rotation (0-360deg).
 ![image](docs/imgs/bending_rotate_analog_portrait.gif)
 
-### 2. VAE Bending [[Workflow](workflows/vae_bending.json)]
-Inject bending modules into your VAE models (Not as strong results as above but I haven't experimented enough to confirm). 
-### 3. Conditionings x Operations  [[Workflow](workflows/conditioning_bending.json)]
-Apply transforming operations to conditionings (what comes out of encoding with CLIP), this helps you move them around in the semantic latent space (i.e. that of CLIP's encodings)
-### 4. CFG Step-wise Operations [[Workflow](workflows/denoising_step_bending.json)]
-Apply transforming operations to the intermediate latents in the sampling/denoising process. In particular, you are asking your KSampler to apply a transformation right before a chosen cdf scaling step. Comfy currently provides an experimental support for applying transformation during all denoising steps, e.g., see LatentApplyOperationCFG and LATENT_OPERATION, where as the provided node (LatentApplyOperationCFGToStep) picks one step.
+Another loop where we inject a scalar value (-10 to 30) to the middle block (middle_block.2.out_layers) of the UNet of the sd_xl_turbo model.
+![image](docs/imgs/bending_add_analog_portrait.gif)
 
-### 5. (NEW) Feature Map Visualization [[Workflow](workflows/feature_map_viz.json)]
-By plugging in a model and a path to a layer, the Visualize Feature Map node shows the features/weights at that layer. It does so by averaging over the channels to get image-like tensors that can be vizualized. [Source](https://ravivaishnav20.medium.com/visualizing-feature-maps-using-pytorch-12a48cd1e573). 
+This project provides:
+
+1. <mark>NEW</mark> **Interactive Bending Web UI** — Plug-and-play. Simply connect the model to the node then send the model downstream. Visualize the model structure (U-Net / transformer), pick layers, and apply bends from the browser. Copy bends as JSON and paste into the **Apply Bends from JSON** node. [[Workflow](workflows/interactive_bending.json)]
+
+![image](docs/imgs/interactive_bending.gif)
+
+2. **Model Bending (UNet)** — Inject bending modules into your MODEL (UNet). Use **Model Bending** (custom paths) or **Model Bending (SD Layers)** (block + layer). The **Model Inspector** node helps you explore layers. [[Workflow](workflows/basic_unet_bending.json)]
+7. <mark>NEW</mark> **LoRA Bending** — Replaces the Load LoRA node. Apply a bending module to LoRA weights. **LoRA Bending** bends every LoRA component (attached matrices) in the model. **LoRA Bending (list)** outputs the list of LoRA matrices in the model for you to pick from. [[Workflow](workflows/lora_bending.json)]
+3. **VAE Bending** — Inject bending modules into your VAE (**Model VAE Bending**). [[Workflow](workflows/vae_bending.json)]
+4. **Conditionings × Operations** — Apply operations to conditionings (CLIP encodings) to move them in semantic latent space (**ConditioningApplyOperation**). [[Workflow](workflows/conditioning_bending.json)]
+5. **CFG step-wise operations** — Apply operations to intermediate latents at a chosen denoising step (**LatentApplyOperationCFGToStep**). Latent operations (multiply, add, threshold, rotate, noise, custom) can be used with conditioning or sampling. [[Workflow](workflows/denoising_step_bending.json)]
+6. **Feature map visualization** — **Visualize Feature Map** shows features at a given layer by averaging over channels into image-like tensors.
+[Source](https://ravivaishnav20.medium.com/visualizing-feature-maps-using-pytorch-12a48cd1e573)
+[[Workflow](workflows/feature_map_viz.json)]
+
 
 ## Quickstart
 
 1. Install [ComfyUI](https://docs.comfy.org/get_started).
-2. Install [ComfyUI-Manager](https://github.com/ltdrdata/ComfyUI-Manager)
-3. Look up this extension in ComfyUI-Manager. If you are installing manually, clone this repository under `ComfyUI/custom_nodes`.
-4. Restart ComfyUI.
-5. All the nodes can be found under model_bending/
+2. (Optional) Install [ComfyUI-Manager](https://github.com/ltdrdata/ComfyUI-Manager) and install this extension from the manager; or clone manually (see below).
+3. Restart ComfyUI.
+4. Web UI: open `{ComfyUI_URL}/web_bend_demo/`. All bending nodes are under **model_bending** / **model_bending_demo** in the node menu.
+
+## Installation (manual)
+
+1. Clone into ComfyUI custom nodes:
+   ```bash
+   cd ComfyUI/custom_nodes
+   git clone <repository-url> ComfyUI-Web-Bend-Demo
+   ```
+   Replace `<repository-url>` with the actual repo URL (e.g. your fork or upstream).
+2. Restart ComfyUI. The web UI is served at `{ComfyUI_URL}/web_bend_demo/`.
+
+## Contents
+
+| Path | Description |
+|------|-------------|
+| **web/** | Web UI (explorer, config, assets). See [web/README.md](web/README.md) for setup and ViewComfy/local Comfy options. |
+| **scripts/** | Experiment runners, export, metrics, and explorer. See [scripts/README.md](scripts/README.md). |
+| **nodes.py** | ComfyUI nodes (e.g. `InteractiveBendingWebUI`, `ApplyBendsFromJSON`). |
+| **model_bending_nodes.py** | Standalone bending nodes (inspector, VAE bending, latent/conditioning ops). |
+| **bendutils.py** | Bending and graph utilities. |
+
+## Configuration
+
+- **Local ComfyUI**: Default `config.js` points to `http://127.0.0.1:8188`; ensure ComfyUI is running with `--listen`.
+- **Remote ViewComfy**: To use remote inference, set `VIEWCOMFY_API_URL`, `VIEWCOMFY_CLIENT_ID`, and `VIEWCOMFY_CLIENT_SECRET` in `web/js/config.js`. The repository ships with empty values; **do not commit real credentials**.
+
+## Available nodes
+
+| Node name | Category / use |
+|-----------|----------------|
+| Interactive Bending WebUI | Web UI — connect MODEL, configure bends in browser |
+| Apply Bends from JSON | Paste JSON from web UI “Copy Bends” |
+| Model Bending | UNet — inject at custom paths |
+| Model Bending (SD Layers) | UNet — pick block + layer index |
+| Model VAE Bending | VAE |
+| Model Inspector | Inspect MODEL structure |
+| Model VAE Inspector | Inspect VAE structure |
+| Apply To Subset (Bending) | Apply module to random subset (batch/channel/spatial) |
+| Add Noise / Add Scalar / Multiply Scalar / Threshold / Rotate / Scale / Erosion / Gradient / Dilation / Sobel Module (Bending) | Bending modules for MODEL or VAE |
+| LoRA Bending | Load LoRA by name; bend all its components with a bending module |
+| LoRA Bending (list) | Load LoRA by name; bend one component (by index or by key). Outputs: bent key, full key list |
+| Visualize Feature Map | Feature map at a layer path |
+| LatentApplyOperationCFGToStep | Apply operation at one denoising step |
+| Latent Operation (Multiply Scalar, Add Scalar, Threshold, Rotate, Add Noise, Custom) | LATENT / CONDITIONING ops |
+| ConditioningApplyOperation | CONDITIONING ops |
 
 ## Notes
-This is an ongoing project. I am excited to share it with you and happy to respond to [issues](https://github.com/abuzreq/ComfyUI-Model-Bending/issues) and features requests as time permits. 
 
-## Available Nodes
-| **    Node Name   **                        |       **    Category   **       |
-|---------------------------------------------|:-------------------------------:|
-|     Model   Bending                         |             UNet (MODEL)        |
-|     Model VAE   Bending                     |                VAE              |
-|     Model   Inspector                       |              MODEL              |
-|     Add Noise   Module (Bending)            |             MODEL/VAE           |
-|     Add   Scalar Module (Bending)           |            MODEL/VAE            |
-|     Multiply   Scalar Module (Bending)      |            MODEL/VAE            |
-|     Threshold   Module (Bending)            |            MODEL/VAE            |
-|     Rotate   Module (Bending)               |            MODEL/VAE            |
-|     Scale Module   (Bending)                |            MODEL/VAE            |
-|     Erosion   Module (Bending)              |            MODEL/VAE            |
-|     Gradient   Module (Bending)             |            MODEL/VAE            |
-|     Dilation   Module (Bending)             |            MODEL/VAE            |
-|     Sobel   Module (Bending)                |            MODEL/VAE            |
-|     LatentApplyOperationCFGToStep           |     Sampling pre-CFG (LATENT)   |
-|     ConditioningApplyOperation              |        CLIP (CONDITIONING)      |
-|     Latent   Operation (Multiply Scalar)    |       LATENT/CONDITIONING       |
-|     Latent   Operation (Add Scalar)         |       LATENT/CONDITIONING       |
-|     Latent   Operation (Threshold)          |       LATENT/CONDITIONING       |
-|     Latent   Operation (Rotate)             |       LATENT/CONDITIONING       |
-|     Latent   Operation (Add Noise)          |       LATENT/CONDITIONING       |
-|     Latent   Operation (Custom)             |       LATENT/CONDITIONING       |
+This is an ongoing project. Issues and feature requests are welcome (e.g. via GitHub issues as applicable).
+
+## Supported Models
+In theory, most of the nodes should work with any model because bending only needs an address/path in the model and that can vary from one model to another. However the Interactive Bending node is currently supported and tested out for Stable Diffusion and Flux variants. 
+
+## License
+
+See [web/LICENSE](web/LICENSE) for license information.

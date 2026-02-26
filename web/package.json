@@ -1,0 +1,31 @@
+{
+  "name": "diffusion-model-visualization",
+  "version": "1.0.0",
+  "description": "Refactored diffusion model visualization with modular architecture",
+  "main": "main.js",
+  "scripts": {
+    "start": "python -m http.server 8000",
+    "dev": "python -m http.server 8000",
+    "test": "echo \"No tests specified\" && exit 0",
+    "lint": "echo \"No linter configured\" && exit 0"
+  },
+  "keywords": [
+    "diffusion",
+    "visualization",
+    "d3",
+    "svg",
+    "interactive"
+  ],
+  "author": "Ahmed Abuzuraiq",
+  "license": "MIT",
+  "dependencies": {
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/diffusion-model-visualization.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yourusername/diffusion-model-visualization/issues"
+  },
+  "homepage": "https://github.com/yourusername/diffusion-model-visualization#readme"
+}

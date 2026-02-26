@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bending Experiments Explorer</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; margin: 0; padding: 16px; background: #1a1a1a; color: #e0e0e0; }
+    h1 { margin: 0 0 16px; font-size: 1.4rem; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 16px; padding: 12px; background: #2a2a2a; border-radius: 8px; }
+    .toolbar label { display: flex; align-items: center; gap: 6px; }
+    .toolbar select, .toolbar input[type="text"] { padding: 6px 10px; border-radius: 4px; background: #333; color: #fff; border: 1px solid #555; min-width: 140px; }
+    .stats { font-size: 0.9rem; color: #aaa; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+    .content-scroll { overflow: auto; max-height: calc(100vh - 160px); position: relative; }
+    .virtual-sizer { pointer-events: none; }
+    .virtual-viewport { position: absolute; left: 0; right: 0; top: 0; display: grid; gap: 12px; grid-template-columns: repeat(var(--cols, 4), 1fr); grid-auto-rows: 268px; }
+    .card { background: #2a2a2a; border-radius: 8px; overflow: hidden; border: 1px solid #444; contain: layout style paint; min-height: 260px; }
+    .card img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; cursor: pointer; }
+    .card-body { padding: 10px; font-size: 0.8rem; line-height: 1.4; }
+    .card-tags { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px; }
+    .tag { background: #444; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; }
+    .lightbox { position: fixed; inset: 0; background: rgba(0,0,0,0.9); display: none; align-items: center; justify-content: center; z-index: 9999; cursor: pointer; }
+    .lightbox.visible { display: flex; }
+    .lightbox img { max-width: 95vw; max-height: 95vh; object-fit: contain; }
+    .lightbox-caption { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.8); padding: 8px 16px; border-radius: 8px; font-size: 0.9rem; max-width: 90%; text-align: center; }
+    .error, .loading { padding: 24px; text-align: center; color: #888; }
+    .group-header { font-size: 0.95rem; font-weight: 600; margin: 20px 0 8px; padding-bottom: 4px; border-bottom: 1px solid #444; color: #90caf9; }
+    .metrics { font-size: 0.75rem; color: #81c784; }
+  </style>
+</head>
+<body>
+  <h1>Bending Experiments Explorer</h1>
+  <div class="toolbar">
+    <label>Batch: <select id="batch-select"><option value="">-- Select batch --</option></select></label>
+    <label>Filter region: <select id="filter-region"><option value="">All</option><option value="input">Input</option><option value="middle">Middle</option><option value="output">Output</option></select></label>
+    <label>Filter container: <select id="filter-container"><option value="">All</option></select></label>
+    <label>Filter bend: <select id="filter-bend"><option value="">All</option><option value="rotate">Rotate</option><option value="add_noise">Add Noise</option><option value="multiply">Multiply</option></select></label>
+    <label>Filter arg value: <select id="filter-module-arg"><option value="">All</option></select></label>
+    <label>Filter steps range: <select id="filter-steps"><option value="">All</option></select></label>
+    <label>Search path: <input type="text" id="search-path" placeholder="e.g. input_blocks" /></label>
+    <label>Group by: <select id="group-by"><option value="">None</option><option value="block_region">Block region</option><option value="block_name">Block name</option><option value="layer_type">Layer type</option><option value="container_type">Container</option><option value="bend_module_type">Bend type</option><option value="steps_range">Steps range</option><option value="layer_path">Layer path</option></select></label>
+    <span id="flat-sort-wrap">
+      <label>Sort by: <select id="sort-by"><option value="layer_path">Layer path</option><option value="block_region">Block region</option><option value="block_name">Block name</option><option value="layer_type">Layer type</option><option value="container_type">Container</option><option value="bend_module_type">Bend type</option><option value="bend_arg">Bend arg value</option><option value="steps_range">Steps range</option><option value="cosine_distance">Cosine dist</option><option value="lpips_distance">LPIPS dist</option><option value="dinov2_distance">DINOv2 dist</option><option value="clip_distance">CLIP dist</option></select></label>
+      <label>Order: <select id="sort-order"><option value="asc">Ascending</option><option value="desc">Descending</option></select></label>
+    </span>
+    <span id="grouped-sort-wrap" style="display:none;">
+      <label>Group sort: <select id="group-sort-agg"><option value="sum">Sum</option><option value="max">Max</option><option value="std">Std</option></select> of <select id="group-sort-metric"><option value="cosine_distance">Cosine dist</option><option value="lpips_distance">LPIPS dist</option><option value="dinov2_distance">DINOv2 dist</option><option value="clip_distance">CLIP dist</option></select></label>
+      <label>Group order: <select id="group-sort-order"><option value="asc">Ascending</option><option value="desc">Descending</option></select></label>
+      <label>Within group: <select id="within-sort-by"><option value="layer_path">Layer path</option><option value="block_region">Block region</option><option value="block_name">Block name</option><option value="layer_type">Layer type</option><option value="container_type">Container</option><option value="bend_module_type">Bend type</option><option value="bend_arg">Bend arg value</option><option value="steps_range">Steps range</option><option value="cosine_distance">Cosine dist</option><option value="lpips_distance">LPIPS dist</option><option value="dinov2_distance">DINOv2 dist</option><option value="clip_distance">CLIP dist</option></select></label>
+      <label>Within order: <select id="within-sort-order"><option value="asc">Ascending</option><option value="desc">Descending</option></select></label>
+    </span>
+    <span class="stats" id="stats">0 results</span>
+  </div>
+  <div id="content"><div class="loading">Loading batch list...</div></div>
+  <div class="lightbox" id="lightbox"><img src="" alt="" /><div class="lightbox-caption" id="lightbox-caption"></div></div>
+  <script>
+    let allResults = [];
+    let currentList = [];
+    let currentCols = 4;
+    let scrollRaf = null;
+    const base = location.pathname.replace(/\/[^/]*$/, "") || "/";
+    const BEND_ARG_KEYS = { multiply: "scalar", rotate: "angle_degrees", add_noise: "noise_std" };
+    const GROUP_AGG_METRICS = ["cosine_distance", "lpips_distance", "dinov2_distance", "clip_distance"];
+    const VIRTUAL_THRESHOLD = 80;
+    const GROUPED_MAX_ITEMS = 500;
+    const ROW_HEIGHT = 280;
+    const BUFFER_ROWS = 2;
+
+    function debounce(fn, ms) {
+      let t;
+      return function () { clearTimeout(t); t = setTimeout(fn, ms); };
+    }
+
+    function getColumns(el) {
+      const w = el.clientWidth || el.offsetWidth || 800;
+      return Math.max(1, Math.floor((w + 12) / 212));
+    }
+    function updateFilterModuleArg() {
+      const bend = document.getElementById("filter-bend").value;
+      const sel = document.getElementById("filter-module-arg");
+      let opts = "<option value=\"\">All</option>";
+      if (!bend) { sel.innerHTML = opts; return; }
+      const key = BEND_ARG_KEYS[bend];
+      if (!key) { sel.innerHTML = opts; return; }
+      const filtered = allResults.filter(r => r.bend_module_type === bend);
+      const vals = [...new Set(filtered.map(r => (r.module_args && r.module_args[key]) != null ? String(r.module_args[key]) : "").filter(Boolean))].sort((a, b) => {
+        const na = parseFloat(a), nb = parseFloat(b);
+        if (!isNaN(na) && !isNaN(nb)) return na - nb;
+        return String(a).localeCompare(String(b));
+      });
+      opts += vals.map(v => "<option value=\"" + escapeAttr(v) + "\">" + escapeHtml(v) + "</option>").join("");
+      sel.innerHTML = opts;
+    }
+    function updateFilterSteps() {
+      const sel = document.getElementById("filter-steps");
+      const pairs = new Set();
+      allResults.forEach(r => {
+        const sm = r.steps_min != null ? r.steps_min : "?";
+        const sx = r.steps_max != null ? r.steps_max : "?";
+        if (sm !== "?" || sx !== "?") pairs.add(sm + "-" + sx);
+      });
+      const sorted = [...pairs].sort((a, b) => {
+        const [a1, a2] = a.split("-").map(x => x === "?" ? -1 : parseInt(x, 10));
+        const [b1, b2] = b.split("-").map(x => x === "?" ? -1 : parseInt(x, 10));
+        if (a1 !== b1) return a1 - b1;
+        return a2 - b2;
+      });
+      sel.innerHTML = "<option value=\"\">All</option>" + sorted.map(p => "<option value=\"" + escapeAttr(p) + "\">" + escapeHtml(p) + "</option>").join("");
+    }
+    function escapeHtml(s) {
+      if (s == null) return "";
+      const t = String(s);
+      return t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    }
+    function escapeAttr(s) {
+      if (s == null) return "";
+      return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    }
+    function naturalCompare(a, b) {
+      const sa = String(a ?? ""), sb = String(b ?? "");
+      const re = /(\d+)|(\D+)/g;
+      let ma, mb;
+      for (;;) {
+        ma = re.exec(sa); mb = re.exec(sb);
+        if (!ma && !mb) return 0;
+        if (!ma) return -1;
+        if (!mb) return 1;
+        if (ma[1] !== undefined && mb[1] !== undefined) {
+          const na = parseInt(ma[1], 10), nb = parseInt(mb[1], 10);
+          if (na !== nb) return na - nb;
+        } else {
+          const c = ma[0].localeCompare(mb[0]);
+          if (c !== 0) return c;
+        }
+      }
+    }
+    function getBendArgValue(r) {
+      const key = BEND_ARG_KEYS[r.bend_module_type];
+      if (!key || !r.module_args) return null;
+      const v = r.module_args[key];
+      return v != null ? v : null;
+    }
+    function compareItems(a, b, sortBy, dir) {
+      let cmp = 0;
+      if (sortBy === "steps_range") {
+        const sa = (a.steps_min ?? -1) * 10000 + (a.steps_max ?? -1);
+        const sb = (b.steps_min ?? -1) * 10000 + (b.steps_max ?? -1);
+        cmp = sa - sb;
+      } else if (sortBy === "bend_arg") {
+        const va = getBendArgValue(a);
+        const vb = getBendArgValue(b);
+        const na = va != null ? Number(va) : NaN;
+        const nb = vb != null ? Number(vb) : NaN;
+        if (!Number.isNaN(na) && !Number.isNaN(nb)) cmp = na - nb;
+        else cmp = naturalCompare(va, vb);
+      } else if (sortBy === "cosine_distance" || sortBy === "lpips_distance" || sortBy === "dinov2_distance" || sortBy === "clip_distance") {
+        const va = a[sortBy] != null ? Number(a[sortBy]) : Infinity;
+        const vb = b[sortBy] != null ? Number(b[sortBy]) : Infinity;
+        cmp = va - vb;
+      } else {
+        cmp = naturalCompare(a[sortBy], b[sortBy]);
+      }
+      return dir * cmp;
+    }
+    function groupAggregate(items, metric, agg) {
+      const vals = items.map(r => r[metric]).filter(v => v != null && !Number.isNaN(Number(v))).map(Number);
+      if (vals.length === 0) return NaN;
+      if (agg === "sum") return vals.reduce((a, b) => a + b, 0);
+      if (agg === "max") return Math.max(...vals);
+      if (agg === "std") {
+        if (vals.length < 2) return 0;
+        const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+        const variance = vals.reduce((s, x) => s + (x - mean) ** 2, 0) / vals.length;
+        return Math.sqrt(variance);
+      }
+      return NaN;
+    }
+    async function loadBatches() {
+      try {
+        const r = await fetch(base + "api/list");
+        const data = await r.json();
+        if (!data.ok) throw new Error(data.error || "Failed to load");
+        const batches = data.batches || [];
+        const sel = document.getElementById("batch-select");
+        sel.innerHTML = "<option value=\"\">-- Select batch --</option>" +
+          batches.map(b => "<option value=\"" + escapeAttr(b.batch_id) + "\">" + escapeHtml(b.batch_id) + " (" + (b.result_count || 0) + " results)</option>").join("");
+      } catch (e) {
+        document.getElementById("content").innerHTML = "<div class=\"error\">Could not load batches: " + e.message + "</div>";
+      }
+    }
+    async function loadBatch(batchId) {
+      if (!batchId) { allResults = []; render(); return; }
+      document.getElementById("content").innerHTML = "<div class=\"loading\">Loading...</div>";
+      try {
+        const r = await fetch(base + "api/data/" + encodeURIComponent(batchId));
+        const data = await r.json();
+        if (!data.ok) throw new Error(data.error || "Failed to load");
+        allResults = data.results || [];
+        const containers = [...new Set(allResults.map(x => x.container_type).filter(Boolean))].sort((a, b) => naturalCompare(a, b));
+        document.getElementById("filter-container").innerHTML = "<option value=\"\">All</option>" + containers.map(c => "<option value=\"" + escapeAttr(c) + "\">" + escapeHtml(c) + "</option>").join("");
+        updateFilterModuleArg();
+        updateFilterSteps();
+        render();
+      } catch (e) {
+        document.getElementById("content").innerHTML = "<div class=\"error\">" + e.message + "</div>";
+      }
+    }
+    function buildCard(r) {
+      const args = r.module_args ? JSON.stringify(r.module_args) : "";
+      const steps = (r.steps_min != null || r.steps_max != null) ? " steps " + (r.steps_min ?? "?") + "-" + (r.steps_max ?? "?") : "";
+      const url = (r.image_url || "").startsWith("/") ? r.image_url : (base + (r.image_url || ""));
+      const cap = escapeAttr((r.layer_path || "") + " | " + (r.bend_module_type || "") + " " + args + steps);
+      const cos = r.cosine_distance != null ? "cos \u0394 " + r.cosine_distance.toFixed(4) : "";
+      const lpips = r.lpips_distance != null ? "LPIPS " + r.lpips_distance.toFixed(4) : "";
+      const dinov2 = r.dinov2_distance != null ? "DINOv2 " + r.dinov2_distance.toFixed(4) : "";
+      const clip = r.clip_distance != null ? "CLIP " + r.clip_distance.toFixed(4) : "";
+      const metrics = [cos, lpips, dinov2, clip].filter(Boolean).join(" · ");
+      const layerShort = escapeHtml((r.layer_path || "").split(".").pop());
+      const blockRegion = escapeHtml(r.block_region || "");
+      const containerType = escapeHtml(r.container_type || "");
+      const bendType = escapeHtml(r.bend_module_type || "");
+      return "<div class=\"card\"><img src=\"" + escapeAttr(url) + "\" alt=\"\" loading=\"lazy\" data-url=\"" + escapeAttr(url) + "\" data-caption=\"" + cap + "\" /><div class=\"card-body\"><strong>" + layerShort + "</strong><br/>" + blockRegion + " · " + containerType + "<br/>" + bendType + " " + escapeHtml(args) + (steps ? "<br/>" + escapeHtml(steps) : "") + (metrics ? "<br/><span class=\"metrics\">" + escapeHtml(metrics) + "</span>" : "") + "<div class=\"card-tags\"><span class=\"tag\">" + (blockRegion || "-") + "</span><span class=\"tag\">" + (containerType || "-") + "</span><span class=\"tag\">" + (bendType || "-") + "</span></div></div></div>";
+    }
+
+    function filterAndSort() {
+      const region = document.getElementById("filter-region").value;
+      const container = document.getElementById("filter-container").value;
+      const bend = document.getElementById("filter-bend").value;
+      const moduleArg = document.getElementById("filter-module-arg").value;
+      const stepsRange = document.getElementById("filter-steps").value;
+      const search = (document.getElementById("search-path").value || "").toLowerCase();
+      let list = allResults.filter(r => {
+        if (r.is_default) return false;
+        if (region && r.block_region !== region) return false;
+        if (container && r.container_type !== container) return false;
+        if (bend && r.bend_module_type !== bend) return false;
+        if (moduleArg) {
+          const key = BEND_ARG_KEYS[bend] || "scalar";
+          const v = r.module_args && r.module_args[key];
+          if (String(v) !== moduleArg) return false;
+        }
+        if (stepsRange) {
+          const sm = r.steps_min != null ? r.steps_min : "?";
+          const sx = r.steps_max != null ? r.steps_max : "?";
+          if (sm + "-" + sx !== stepsRange) return false;
+        }
+        if (search && !(r.layer_path || "").toLowerCase().includes(search)) return false;
+        return true;
+      });
+      const sortBy = document.getElementById("sort-by").value;
+      const order = document.getElementById("sort-order").value;
+      const dir = order === "desc" ? -1 : 1;
+      list.sort((a, b) => {
+        let cmp = 0;
+        if (sortBy === "steps_range") {
+          const sa = (a.steps_min ?? -1) * 10000 + (a.steps_max ?? -1);
+          const sb = (b.steps_min ?? -1) * 10000 + (b.steps_max ?? -1);
+          cmp = sa - sb;
+        } else if (sortBy === "bend_arg") {
+          const va = getBendArgValue(a);
+          const vb = getBendArgValue(b);
+          const na = va != null ? Number(va) : NaN;
+          const nb = vb != null ? Number(vb) : NaN;
+          if (!Number.isNaN(na) && !Number.isNaN(nb)) cmp = na - nb;
+          else cmp = naturalCompare(va, vb);
+        } else if (sortBy === "cosine_distance" || sortBy === "lpips_distance" || sortBy === "dinov2_distance" || sortBy === "clip_distance") {
+          const va = a[sortBy] != null ? Number(a[sortBy]) : Infinity;
+          const vb = b[sortBy] != null ? Number(b[sortBy]) : Infinity;
+          cmp = va - vb;
+        } else {
+          cmp = naturalCompare(a[sortBy], b[sortBy]);
+        }
+        return dir * cmp;
+      });
+      return list;
+    }
+
+    function updateVirtualView() {
+      const content = document.getElementById("content");
+      const viewport = document.getElementById("virtual-viewport");
+      const sizer = document.getElementById("virtual-sizer");
+      if (!viewport || !sizer || !content || currentList.length === 0) return;
+      const cols = currentCols;
+      const numRows = Math.ceil(currentList.length / cols);
+      const scrollTop = content.scrollTop;
+      const clientHeight = content.clientHeight;
+      const startRow = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - BUFFER_ROWS);
+      const endRow = Math.min(numRows, Math.ceil((scrollTop + clientHeight) / ROW_HEIGHT) + BUFFER_ROWS);
+      const startIdx = startRow * cols;
+      const endIdx = Math.min(currentList.length, endRow * cols);
+      const slice = currentList.slice(startIdx, endIdx);
+      viewport.style.top = (startRow * ROW_HEIGHT) + "px";
+      viewport.style.setProperty("--cols", cols);
+      viewport.innerHTML = slice.map(buildCard).join("");
+      viewport.querySelectorAll(".card img").forEach(img => {
+        img.onclick = () => { document.getElementById("lightbox").querySelector("img").src = img.dataset.url || ""; document.getElementById("lightbox-caption").textContent = img.dataset.caption || ""; document.getElementById("lightbox").classList.add("visible"); };
+      });
+    }
+
+    function onScrollVirtual() {
+      if (scrollRaf != null) return;
+      scrollRaf = requestAnimationFrame(function () {
+        scrollRaf = null;
+        updateVirtualView();
+      });
+    }
+
+    function attachLightboxToCards(container) {
+      if (!container) return;
+      container.querySelectorAll(".card img").forEach(img => {
+        img.onclick = () => { document.getElementById("lightbox").querySelector("img").src = img.dataset.url || ""; document.getElementById("lightbox-caption").textContent = img.dataset.caption || ""; document.getElementById("lightbox").classList.add("visible"); };
+      });
+    }
+
+    function render() {
+      const list = filterAndSort();
+      const groupBy = document.getElementById("group-by").value;
+      const flatWrap = document.getElementById("flat-sort-wrap");
+      const groupedWrap = document.getElementById("grouped-sort-wrap");
+      if (groupBy) {
+        flatWrap.style.display = "none";
+        groupedWrap.style.display = "";
+      } else {
+        flatWrap.style.display = "";
+        groupedWrap.style.display = "none";
+      }
+      document.getElementById("stats").textContent = list.length + " results";
+      const content = document.getElementById("content");
+      content.className = "";
+      content.onscroll = null;
+
+      if (list.length === 0) { content.innerHTML = "<div class=\"loading\">No results match filters.</div>"; return; }
+
+      if (groupBy) {
+        const groups = {};
+        list.forEach(r => {
+          let k;
+          if (groupBy === "steps_range") {
+            const sm = r.steps_min != null ? r.steps_min : "?";
+            const sx = r.steps_max != null ? r.steps_max : "?";
+            k = (sm !== "?" || sx !== "?") ? sm + "-" + sx : "(not set)";
+          } else k = r[groupBy] ?? "(empty)";
+          if (!groups[k]) groups[k] = []; groups[k].push(r);
+        });
+        const agg = document.getElementById("group-sort-agg").value;
+        const metric = document.getElementById("group-sort-metric").value;
+        const groupOrder = document.getElementById("group-sort-order").value;
+        const groupDir = groupOrder === "desc" ? -1 : 1;
+        const withinBy = document.getElementById("within-sort-by").value;
+        const withinOrder = document.getElementById("within-sort-order").value;
+        const withinDir = withinOrder === "desc" ? -1 : 1;
+        const sortedKeys = Object.keys(groups).sort((a, b) => {
+          const va = groupAggregate(groups[a], metric, agg);
+          const vb = groupAggregate(groups[b], metric, agg);
+          const na = Number.isNaN(va) ? -Infinity : va;
+          const nb = Number.isNaN(vb) ? -Infinity : vb;
+          if (na !== nb) return groupDir * (na - nb);
+          if (groupBy === "steps_range" && a !== "(not set)" && b !== "(not set)") {
+            const [a1, a2] = a.split("-").map(x => x === "?" ? -1 : parseInt(x, 10));
+            const [b1, b2] = b.split("-").map(x => x === "?" ? -1 : parseInt(x, 10));
+            if (a1 !== b1) return a1 - b1;
+            return a2 - b2;
+          }
+          return naturalCompare(a, b);
+        });
+        sortedKeys.forEach(k => {
+          groups[k].sort((a, b) => compareItems(a, b, withinBy, withinDir));
+        });
+        let totalRendered = 0;
+        const cap = list.length > GROUPED_MAX_ITEMS ? GROUPED_MAX_ITEMS : list.length;
+        let html = "";
+        for (const k of sortedKeys) {
+          const groupItems = groups[k];
+          const remaining = cap - totalRendered;
+          if (remaining <= 0) break;
+          const toShow = Math.min(groupItems.length, remaining);
+          html += "<div class=\"group-header\">" + groupBy + ": " + escapeHtml(k) + "</div><div class=\"grid\">";
+          for (let i = 0; i < toShow; i++) html += buildCard(groupItems[i]);
+          html += "</div>";
+          totalRendered += toShow;
+        }
+        if (list.length > GROUPED_MAX_ITEMS) {
+          html = "<div class=\"group-header\" style=\"color:#ffb74d\">Showing first " + GROUPED_MAX_ITEMS + " of " + list.length + " results. Clear Group by or narrow filters to browse all.</div>" + html;
+        }
+        content.innerHTML = html;
+        attachLightboxToCards(content);
+        return;
+      }
+
+      if (list.length <= VIRTUAL_THRESHOLD) {
+        content.innerHTML = "<div class=\"grid\">" + list.map(buildCard).join("") + "</div>";
+        attachLightboxToCards(content);
+        return;
+      }
+
+      currentList = list;
+      content.className = "content-scroll";
+      currentCols = getColumns(content);
+      const numRows = Math.ceil(list.length / currentCols);
+      content.innerHTML = "<div class=\"virtual-sizer\" id=\"virtual-sizer\"></div><div class=\"virtual-viewport\" id=\"virtual-viewport\"></div>";
+      const sizer = document.getElementById("virtual-sizer");
+      const viewport = document.getElementById("virtual-viewport");
+      sizer.style.height = (numRows * ROW_HEIGHT) + "px";
+      viewport.style.setProperty("--cols", currentCols);
+      viewport.style.gridAutoRows = ROW_HEIGHT + "px";
+      content.onscroll = onScrollVirtual;
+      updateVirtualView();
+    }
+    function onResize() {
+      const content = document.getElementById("content");
+      if (!content.classList.contains("content-scroll") || currentList.length === 0) return;
+      const sizer = document.getElementById("virtual-sizer");
+      const viewport = document.getElementById("virtual-viewport");
+      if (!sizer || !viewport) return;
+      currentCols = getColumns(content);
+      const numRows = Math.ceil(currentList.length / currentCols);
+      sizer.style.height = (numRows * ROW_HEIGHT) + "px";
+      viewport.style.setProperty("--cols", currentCols);
+      updateVirtualView();
+    }
+
+    document.getElementById("lightbox").onclick = () => document.getElementById("lightbox").classList.remove("visible");
+    document.getElementById("batch-select").onchange = () => loadBatch(document.getElementById("batch-select").value);
+    document.getElementById("filter-bend").onchange = () => { updateFilterModuleArg(); render(); };
+    ["filter-region", "filter-container", "filter-module-arg", "filter-steps", "group-by", "sort-by", "sort-order", "group-sort-agg", "group-sort-metric", "group-sort-order", "within-sort-by", "within-sort-order"].forEach(id => { const el = document.getElementById(id); if (el) el.onchange = render; });
+    document.getElementById("search-path").oninput = debounce(render, 200);
+    window.addEventListener("resize", debounce(onResize, 100));
+    loadBatches();
+  </script>
+</body>
+</html>

@@ -1,0 +1,1282 @@
+/* ========================================
+   BASE STYLES
+   ======================================== */
+body {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 4px;
+  margin: 0px;
+  font-family: sans-serif;
+  overflow-y: hidden;
+}
+
+/* ========================================
+   HEADER & CONTROLS
+   ======================================== */
+
+/* Author info */
+.author-info {
+  position: absolute;
+  top: 10px;
+  right: 15px;
+  font-size: small;
+}
+
+/* Controls header */
+.controls {
+  display: flex;
+  flex-direction: row;
+  justify-items: center;
+  align-items: center;
+  border-bottom: 1px black solid;
+  margin-bottom: 5px;
+  padding-bottom: 5px;
+  flex-wrap: wrap; /* Allow wrapping on smaller screens */
+  gap: 10px; /* Add gap between elements */
+}
+
+.controls label {
+  margin: 5px;
+}
+
+.controls select {
+  margin: 5px;
+}
+
+/* Header title styling */
+.header-title {
+  margin-bottom: 4px;
+  margin-top: 0px;
+}
+
+/* Social links */
+.social-links {
+  display: flex;
+  gap: 1rem;
+}
+
+.social-icon {
+  width: 24px;
+  height: 24px;
+  color: #333;
+  transition: opacity 0.2s ease-in-out;
+}
+
+.social-icon:hover {
+  opacity: 0.7;
+}
+
+/* Tooltip styling */
+.tooltip {
+  position: relative;
+  display: inline-block;
+  cursor: help;
+  color: #007bff;
+  font-weight: bold;
+  margin-right: 4px;
+}
+
+.tooltip .tooltiptext {
+  visibility: hidden;
+  width: 180px;
+  background-color: #333;
+  color: #fff;
+  text-align: left;
+  border-radius: 5px;
+  padding: 6px;
+  position: absolute;
+  z-index: 1;
+  top: 125%;
+  left: 50%;
+  transform: translateX(-50%);
+  opacity: 0;
+  transition: opacity 0.2s;
+  font-size: 12px;
+}
+
+.tooltip:hover .tooltiptext {
+  visibility: visible;
+  opacity: 1;
+}
+
+/* Radio button sections */
+.radio-section {
+  padding-left: 2px;
+}
+
+.radio-section-with-border {
+  margin-left: 8px;
+  padding-left: 2px;
+  border-left: lightgray solid 1px;
+}
+
+/* Live section styling */
+.live-section {
+  opacity: 0.4;
+  pointer-events: none;
+  display: flex;
+  flex-direction: row;
+}
+
+.live-section.active {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Prompt input styling */
+.prompt-input {
+  width: 300px;
+  max-width: 100%; /* Ensure it doesn't overflow on small screens */
+  padding: 4px;
+  margin: 0px;
+  margin-top: 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+/* Mode selection styling */
+.mode-selection {
+  display: inline-flex;
+  flex-direction: column;
+}
+
+.mode-selection label {
+  display: inline;
+  color: #787272;
+}
+
+.mode-selection label.enabled {
+  color: inherit;
+}
+
+/* Button styling */
+.btn-primary {
+  padding: 8px 16px;
+  margin: 5px;
+  background: #007bff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.btn-load {
+  padding: 8px 16px;
+  margin-top: 8px;
+  background: #007bff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+/* ========================================
+   LAYOUT & CONTAINERS
+   ======================================== */
+
+/* Main container: left=unet-expanded (big), right=preview+diagram (smaller) */
+#outer-container {
+  position: relative;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  width: 100%;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* Left: Unet expanded - takes most space */
+.unet-expanded-wrapper {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 300px;
+  min-height: 300px;
+  display: flex;
+  flex-direction: column;
+}
+
+#unet-expanded {
+  flex: 1;
+  min-height: 0;
+}
+
+/* Timestep range controls at bottom centre of unet-expanded area */
+.unet-steps-controls {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  font-size: 14px;
+}
+.unet-steps-label {
+  white-space: nowrap;
+  color: #333;
+}
+.unet-steps-input {
+  width: 60px;
+  padding: 6px 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 14px;
+}
+.unet-steps-sep {
+  color: #666;
+}
+.unet-steps-hint {
+  color: #888;
+  font-size: 12px;
+}
+.unet-steps-reset-btn {
+  padding: 4px 10px;
+  font-size: 13px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+}
+.unet-steps-reset-btn:hover {
+  background: #f0f0f0;
+  border-color: #999;
+}
+
+.unet-refresh-btn {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 20;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease;
+}
+
+.unet-refresh-btn:hover {
+  background: rgba(255, 255, 255, 1);
+  border-color: #999;
+}
+
+/* Custom fast tooltip (shows after ~150ms, faster than native title) */
+.fast-tooltip {
+  position: fixed;
+  z-index: 10000;
+  max-width: 280px;
+  padding: 6px 10px;
+  background: rgba(0, 0, 0, 0.85);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.4;
+  border-radius: 4px;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.1s ease, visibility 0.1s ease;
+}
+.fast-tooltip.visible {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* Resizable divider between unet and right column */
+.main-resizer {
+  flex: 0 0 6px;
+  background: #ddd;
+  cursor: col-resize;
+  border-left: 1px solid #bbb;
+  border-right: 1px solid #bbb;
+  transition: background 0.15s ease;
+  user-select: none;
+}
+
+.main-resizer:hover {
+  background: #bbb;
+}
+
+.main-resizer:active {
+  background: #999;
+}
+
+/* Right column: preview on top, diagram below. Width controlled by resizer. */
+#right-column {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 380px;
+  min-width: 320px;
+  max-width: 42%;
+  overflow: hidden;
+}
+
+/* Preview image + history - top of right column */
+#image-container {
+  flex: 0 0 auto;
+  min-height: 200px;
+}
+
+/* Info + diagram - bottom of right column, info on top */
+#left-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 150px;
+  min-width: 0;
+}
+
+#info-parent-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  height: 200px;
+  min-height: 80px;
+  max-height: 70vh;
+  overflow: hidden;
+  border-bottom: 1px #ddd solid;
+}
+
+/* Info panel header with close button */
+.info-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 5px;
+  flex-shrink: 0;
+  gap: 8px;
+}
+
+.info-panel-hint {
+  font-size: 12px;
+  color: #666;
+  font-weight: normal;
+}
+
+.info-panel-close-btn {
+  background: none;
+  border: none;
+  font-size: 20px;
+  font-weight: bold;
+  color: #666;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 3px;
+  transition: all 0.2s ease;
+  line-height: 1;
+}
+
+.info-panel-close-btn:hover {
+  background-color: #f0f0f0;
+  color: #333;
+}
+
+.info-panel-close-btn:active {
+  background-color: #e0e0e0;
+}
+
+/* Hidden info panel state */
+#info-parent-panel.hidden {
+  display: none;
+}
+
+/* Resize handle between info panel and diagram: drag to give more space to the diagram */
+.diagram-resizer {
+  flex: 0 0 6px;
+  min-height: 6px;
+  background: #ddd;
+  cursor: ns-resize;
+  border-top: 1px solid #bbb;
+  border-bottom: 1px solid #bbb;
+  transition: background 0.15s ease;
+  user-select: none;
+}
+
+.diagram-resizer:hover {
+  background: #bbb;
+}
+
+.diagram-resizer:active {
+  background: #999;
+}
+
+#info-parent-panel.hidden + .diagram-resizer {
+  display: none;
+}
+
+/* Info panel toggle button */
+.info-panel-toggle-btn {
+  background: #007bff;
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  font-size: 16px;
+  cursor: pointer;
+  z-index: 100;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.info-panel-toggle-btn:hover {
+  background: #0056b3;
+  transform: scale(1.1);
+}
+
+#info-panel {
+  border: #ccc solid 1px;
+  padding: 6px;
+  padding-top: 0px;
+  font-size: medium;
+  overflow-y: auto;
+  overflow-x: hidden;
+  flex: 1;
+  min-height: 0;
+}
+
+#output_params {
+  position: absolute;
+  bottom: 8px;
+  right: 25px;
+  z-index: 15;
+  background: rgba(255, 255, 255, 0.9);
+  padding: 8px;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  font-size: 12px;
+  max-width: 40%;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.copy-bends-btn {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  font-size: 14px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+}
+.copy-bends-btn:hover {
+  background: #f0f0f0;
+  border-color: #999;
+}
+
+/* ========================================
+   RESPONSIVE BREAKPOINTS
+   ======================================== */
+
+/* Large desktop screens (1920px and up) */
+@media (min-width: 1920px) {
+  #right-column {
+    flex: 0 0 620px;
+  }
+
+  #default_image {
+    width: min(250px, 15vw);
+    height: min(250px, 15vw);
+  }
+
+  .legend-container {
+    max-width: 350px;
+    font-size: 14px;
+  }
+
+  #info-panel {
+    font-size: 16px;
+  }
+}
+
+/* Standard desktop screens (1200px - 1919px) */
+@media (min-width: 1200px) and (max-width: 1919px) {
+  #right-column { flex: 0 0 360px; }
+}
+
+/* Smaller desktop screens (1024px - 1199px) */
+@media (min-width: 1024px) and (max-width: 1199px) {
+  #right-column { flex: 0 0 320px; min-width: 280px; }
+  #info-parent-panel {
+    flex: 0 0 180px;
+    height: 180px;
+    min-height: 180px;
+  }
+
+  #default_image {
+    width: min(150px, 25vw);
+    height: min(150px, 25vw);
+  }
+}
+
+@media screen and (max-width: 800px) {
+  #info-parent-panel {
+    display: none;
+  }
+}
+/* Tablet landscape (768px - 1023px) */
+@media (min-width: 768px) and (max-width: 1023px) {
+  #right-column { flex: 0 0 280px; min-width: 240px; }
+  #info-parent-panel {
+    flex: 0 0 160px;
+    height: 160px;
+    min-height: 160px;
+  }
+
+  #default_image {
+    width: min(120px, 30vw);
+    height: min(120px, 30vw);
+  }
+
+  .legend-container {
+    max-width: 250px;
+    font-size: 12px;
+  }
+
+  .controls {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .prompt-input {
+    width: 100%;
+    max-width: 400px;
+  }
+}
+
+/* Mobile and small screens (below 768px) */
+@media (max-width: 767px) {
+  #info-panel {
+    display: none;
+  }
+
+  #outer-container {
+    flex-direction: column;
+  }
+
+  .unet-expanded-wrapper { min-height: 200px; }
+  #right-column {
+    flex: 1 1 0;
+    min-width: 0;
+    border-left: none;
+    border-top: 1px black solid;
+  }
+
+  #default_image {
+    width: min(120px, 25vw);
+    height: min(120px, 25vw);
+    bottom: 5px;
+    right: 5px;
+    min-width: 80px; /* Ensure it's never too small to be useful */
+    min-height: 80px;
+  }
+}
+
+/* ========================================
+   DIAGRAM & IMAGE CONTAINERS
+   ======================================== */
+
+/* Diagram container - fills remaining space below info, overflow auto for pan/zoom */
+#diagram-container {
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+  overflow: auto;
+  flex: 1;
+  min-width: 0;
+  min-height: 80px;
+  box-sizing: border-box;
+  width: 100%;
+}
+
+#diagram-container #svg-diagram {
+  flex: 1;
+  min-width: 0;
+  min-height: 80px;
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  cursor: grab;
+}
+
+#diagram-container #svg-diagram:active {
+  cursor: grabbing;
+}
+
+#diagram-container .clickable {
+  cursor: pointer;
+}
+
+/* Image container */
+#image-container {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px #ccc solid;
+  padding: 8px;
+  user-select: none;
+  overflow: visible;
+  min-width: 0;
+}
+
+#image-container.comfy-queue-visible {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+#image-container #output_image_wrap {
+  position: relative;
+  margin-bottom: 10px;
+  min-height: 280px;
+  flex: 1;
+  overflow: visible;
+  padding-bottom: 8px;
+}
+
+.preview-with-hover-zoom {
+  position: relative;
+  cursor: pointer;
+}
+
+.preview-zoom-overlay {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 35%;
+  height: 75%;
+  max-width: 90vw;
+  max-height: 90vh;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-color: rgba(255,255,255,0.0);
+  /*border: 1px solid #ccc;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+  border-radius: 8px;*/
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.15s ease, visibility 0.15s ease;
+  z-index: 9999;
+}
+
+.preview-with-hover-zoom.has-preview-image:hover .preview-zoom-overlay {
+  opacity: 1;
+  visibility: visible;
+}
+
+
+/* ComfyUI error banner */
+.comfy-error-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  background: #f8d7da;
+  border: 1px solid #f5c2c7;
+  border-radius: 6px;
+  color: #842029;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+.comfy-error-banner #comfy-error-text {
+  flex: 1;
+  word-break: break-word;
+}
+/* Info variant (blue) for non-error messages */
+#comfy-error-banner.comfy-info-banner {
+  background: #cce5ff;
+  border-color: #b8daff;
+  color: #004085;
+}
+#comfy-error-banner.comfy-info-banner .comfy-error-dismiss {
+  color: #004085;
+}
+.comfy-error-dismiss {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  background: transparent;
+  border: none;
+  color: #842029;
+  font-size: 18px;
+  cursor: pointer;
+  line-height: 1;
+}
+.comfy-error-dismiss:hover {
+  opacity: 0.8;
+}
+
+.comfy-history-strip {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 4px 0;
+  min-height: 56px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  max-height: 80px;
+}
+
+.comfy-history-strip .comfy-history-label {
+  font-size: 12px;
+  color: #666;
+  margin-right: 4px;
+  flex-shrink: 0;
+}
+
+.comfy-history-strip .comfy-history-thumbs {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+.comfy-history-thumb {
+  width: 60px;
+  height: 60px;
+  padding: 0;
+  border: 2px solid #ccc;
+  border-radius: 4px;
+  background-size: cover;
+  background-position: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  background-color: #f5f5f5;
+}
+
+.comfy-history-thumb:hover {
+  border-color: #1f77b4;
+  box-shadow: 0 0 4px rgba(31, 119, 180, 0.4);
+}
+
+@keyframes comfy-progress-indeterminate {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(350%); }
+}
+
+#comfy-progress-bar .comfy-progress-bar-fill {
+  height: 100%;
+  width: 30%;
+  background: #1f77b4;
+  border-radius: 3px;
+  animation: comfy-progress-indeterminate 1.2s ease-in-out infinite;
+}
+
+#output_image {
+  position: relative;
+  width: 100%;
+  min-height: 280px;
+  max-height: 400px;
+  aspect-ratio: 1;
+  object-fit: contain;
+  display: block;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center center;
+  background-image: url();
+}
+
+/* Position the preview at bottom-right corner inside the container */
+#default_image {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  width: min(160px, 18vw);
+  height: min(160px, 18vw);
+  max-width: 35%;
+  max-height: 45%;
+  border: 1px solid #ccc;
+  background: white;
+  box-shadow: 0 0 5px rgba(0, 0, 0, 0.15);
+  z-index: 10;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center center;
+  background-image: url();
+}
+
+#default_image > img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* ========================================
+   UNET VISUALIZATION
+   ======================================== */
+
+#unet {
+  user-select: none;
+}
+
+/* UNet expanded area - flex/size set in main container section. Pan/zoom enabled. */
+#unet-expanded {
+  overflow: auto;
+  width: 100%;
+  box-sizing: border-box;
+  background: #f8f8f8;
+  position: relative;
+  visibility: hidden;
+  cursor: grab;
+}
+
+#unet-expanded:active {
+  cursor: grabbing;
+}
+
+/* Block content takes precedence: pointer/default over interactive elements so pan/zoom doesn't override */
+#unet-expanded g[name],
+#unet-expanded .container-group,
+#unet-expanded .sub-group,
+#unet-expanded foreignObject {
+  cursor: default;
+}
+
+#unet-expanded .block-main-rect,
+#unet-expanded .sub-group,
+#unet-expanded .block-reset-btn,
+#unet-expanded .svg-slider,
+#unet-expanded .svg-slider circle {
+  cursor: pointer;
+}
+
+#unet-expanded .container-groups-layer {
+  cursor: default;
+}
+
+/* Slider tick for default value - visually highlighted */
+#unet-expanded .slider-tick-default {
+  stroke: #555 !important;
+  stroke-width: 1.5 !important;
+}
+
+#unet-tutorial {
+  width: 100%;
+  border: 1px solid #ccc;
+  opacity: 70%;
+}
+
+#wrapper {
+  width: 100vw;
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
+}
+
+/* ========================================
+   SVG DIAGRAM STYLES
+   ======================================== */
+
+/* Block styles */
+.block {
+  fill: #e8f5e9 ;
+  stroke: #333;
+  stroke-width: 1.5px;
+  cursor: pointer;
+}
+
+.label {
+  font-size: 13px;
+  font-weight: bold;
+  font-family: sans-serif;
+}
+
+/* Skip lines */
+.skip-line {
+  stroke: orange;
+  stroke-width: 2px;
+  stroke-dasharray: 4 2;
+  opacity: 0.8;
+}
+
+.skip-line.highlighted {
+  stroke-width: 4px;
+}
+
+/* Flow direction: inter-block flow lines (marching ants) */
+.flow-line {
+  animation: flow-line-march 0.6s linear infinite;
+}
+
+@keyframes flow-line-march {
+  from {
+    stroke-dashoffset: 0;
+  }
+  to {
+    stroke-dashoffset: 10;
+  }
+}
+
+/* Segment tint: input (cool), middle (neutral), output (warm) */
+#unet-expanded .flow-input .block-main-rect {
+  fill: #e3eef5;
+}
+
+#unet-expanded .flow-middle .block-main-rect {
+  fill: #e8f5e9;
+}
+
+#unet-expanded .flow-output .block-main-rect {
+  fill: #f5f0e3;
+}
+
+/* Sub-labels */
+.sub-label {
+  font-size: 10px;
+  font-family: monospace;
+  fill: #444;
+  cursor: pointer;
+  user-select: none;
+}
+
+/* Expandable container-group panels */
+.container-group-header {
+  user-select: none;
+}
+.container-group-header:hover .container-header-rect {
+  fill: #e0e0e0;
+}
+.container-header-rect {
+  transition: fill 0.15s ease;
+}
+.container-header-chevron {
+  fill: #444;
+  font-family: sans-serif;
+}
+.container-header-label {
+  fill: #333;
+  font-family: sans-serif;
+}
+.reset-btn-icon,
+.container-reset-btn {
+  transition: fill 0.15s ease;
+}
+
+.bend-type-select {
+  font-size: 11px;
+  padding: 0 2px;
+  border: 1px solid #ccc;
+  border-radius: 2px;
+  background: #fff;
+}
+
+.sub-group > .subgroup-rect {
+  fill: #f9f9f9 !important;
+}
+
+/* Bent layer: background like container group when it has bent subs (MODIFIED_BLOCK) */
+.sub-group.bent > .subgroup-rect {
+  fill: #c8e6c9 !important;
+}
+
+/* Selected (interacted with) overrides so highlight remains visible on bent layers */
+.sub-group.selected > .subgroup-rect {
+  fill: #d6eaff !important;
+}
+
+.sub-group.selected > .sub-label {
+  stroke: cadetblue;
+  stroke-width: 0.25px;
+  stroke-linejoin: round;
+  font-weight: bold;
+}
+
+/* Highlight levels based on bend */
+.sub-label.selected_1 {
+  fill: #004bcd;
+  font-weight: bold;
+}
+
+.sub-label.selected_2 {
+  fill: mediumblue;
+  font-weight: bold;
+}
+
+.sub-label.selected_3 {
+  fill: navy;
+  font-weight: bold;
+}
+
+/* ========================================
+   LEGEND & OVERLAYS
+   ======================================== */
+
+.legend-title {
+  font-size: 14px;
+  font-weight: bold;
+  margin-bottom: 5px;
+}
+
+.legend-item {
+  display: flex;
+  align-items: anchor-center;
+  padding: 2px;
+}
+
+.legend-item .legend-color {
+  width: 25px;
+  height: 25px;
+  display: inline-block;
+  margin-right: 15px;
+}
+
+.legend-container {
+  position: absolute;
+  bottom: 5px;
+  left: 5px;
+  z-index: 999;
+  visibility: hidden;
+  max-width: 300px; /* Prevent legend from becoming too wide */
+  background: rgba(
+    255,
+    255,
+    255,
+    0.9
+  ); /* Semi-transparent background for readability */
+  padding: 8px;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* Legend header with close button */
+.legend-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 5px;
+}
+
+.legend-close-btn {
+  background: none;
+  border: none;
+  font-size: 16px;
+  font-weight: bold;
+  color: #666;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 3px;
+  transition: all 0.2s ease;
+  line-height: 1;
+}
+
+.legend-close-btn:hover {
+  background-color: #f0f0f0;
+  color: #333;
+}
+
+.legend-close-btn:active {
+  background-color: #e0e0e0;
+}
+
+#legend-toggle{
+  display: none; 
+}
+
+/* Legend toggle button (shows when legend is closed) */
+.legend-toggle-btn {
+  
+  position: absolute;
+  bottom: 5px;
+  left: 5px;
+  z-index: 999;
+  background: #007bff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.legend-toggle-btn:hover {
+  background: #0056b3;
+  transform: scale(1.05);
+}
+
+.legend-toggle-btn:active {
+  background: #004085;
+  transform: scale(0.95);
+}
+
+/* Hidden legend state */
+.legend-container.hidden {
+  display: none;
+}
+
+@media only screen and (max-width: 1024px) {
+  .legend-container {
+    display: none;
+  }
+}
+
+.contact-container {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  z-index: 999;
+}
+/* ========================================
+   TOP DIAGRAM STYLES
+   ======================================== */
+
+.node-label {
+  font-family: sans-serif;
+  font-size: 12px;
+  text-anchor: middle;
+  dominant-baseline: middle;
+}
+
+.node-label tspan {
+  user-select: none;
+}
+
+.link {
+  fill: none;
+  stroke: #000;
+  stroke-width: 1.5;
+}
+
+.link.dashed {
+  stroke-dasharray: 10 6;
+  animation: dash 3s linear infinite;
+}
+
+@keyframes dash {
+  to {
+    stroke-dashoffset: -100;
+  }
+}
+
+/* Node styles */
+.node-rect {
+  fill: #fff;
+  stroke: #000;
+  stroke-width: 1.25px;
+  rx: 11;
+  ry: 11;
+  vector-effect: non-scaling-stroke;
+}
+
+.node-rect.dashed {
+  stroke-dasharray: 3.1 1.55;
+}
+
+/* SVG elements */
+svg g.clickable {
+  cursor: pointer;
+}
+
+svg g.unclickable {
+  cursor: not-allowed !important;
+}
+
+svg g.unclickable:hover rect,
+svg g.unclickable:hover path {
+  stroke: rgb(0, 0, 0) !important;
+  stroke-width: 1 !important;
+}
+
+svg g.clickable:hover rect,
+svg g.clickable:hover path {
+  stroke: #007bff;
+  stroke-width: 2;
+}
+
+#unet tspan {
+  font-size: 20px;
+}
+
+/* ========================================
+   ANIMATIONS & EFFECTS
+   ======================================== */
+
+/* Glow animation for SVG elements */
+.glowing-shadow-component {
+  animation: pulse-glow 2.5s infinite alternate;
+}
+
+@keyframes pulse-glow {
+  from {
+    stddeviation: 5;
+    flood-opacity: 0.7;
+  }
+  to {
+    stddeviation: 15;
+    flood-opacity: 1;
+  }
+}
+
+/* ========================================
+   UTILITY CLASSES
+   ======================================== */
+
+.diagram-nodes {
+  transform: translate(-50px, 0px);
+}
+
+.diagram-links {
+  transform: translate(-50px, 0px);
+}
+
+/* Flex utilities */
+.flex-row {
+  display: flex;
+  flex-direction: row;
+}
+
+.flex-column {
+  display: flex;
+  flex-direction: column;
+}
+
+.align-end {
+  align-items: end;
+}
+
+/* Info panel styling */
+.info-title {
+  margin-top: 5px;
+}
+
+/* Hidden elements */
+.hidden {
+  visibility: hidden;
+}
+
+/* Info sections */
+#info-unet {
+  display: none;
+}
+
+#below-title-bar {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 15px;
+  justify-content: space-between;
+}

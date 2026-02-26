@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script src="js/vendor/d3.v7.min.js"></script>
+    <script src="js/vendor/socket.io.min.js"></script>
+    <title>Interactive Diffusion Model Bending</title>
+    <link rel="stylesheet" href="style/styles.css" />
+  </head>
+  <body>
+
+    <div class="legend-container">
+      <div class="legend-header">
+        <div class="legend-title">Block Type Categories</div>
+        <button id="legend-close" class="legend-close-btn" title="Close legend">
+          ×
+        </button>
+      </div>
+
+      <div class="legend-item">
+        <div class="legend-color" style="background-color: #666666"></div>
+        <span class="legend-label">Conv2d</span>
+      </div>
+
+      <div class="legend-item">
+        <div class="legend-color" style="background-color: #1f77b4"></div>
+        <span class="legend-label">ResBlock.Sequential.Conv2d</span>
+      </div>
+
+      <div class="legend-item">
+        <div class="legend-color" style="background-color: #ff7f0e"></div>
+        <span class="legend-label">ResBlock.Conv2d (skip-connection)</span>
+      </div>
+
+      <div class="legend-item">
+        <div class="legend-color" style="background-color: #e377c2"></div>
+        <span class="legend-label">SpatialTransformer.Conv2d</span>
+      </div>
+
+      <div class="legend-item">
+        <div class="legend-color" style="background-color: #2ca02c"></div>
+        <span class="legend-label">Upsample.Conv2d</span>
+      </div>
+
+      <div class="legend-item">
+        <div class="legend-color" style="background-color: #d62728"></div>
+        <span class="legend-label">Downsample.Conv2d</span>
+      </div>
+    </div>
+
+    <!-- Legend toggle button (shows when legend is closed) -->
+    <button
+      id="legend-toggle"
+      class="legend-toggle-btn"
+      title="Show legend"
+      style="display: none"
+    >
+      Legend
+    </button>
+    <div id="outer-container">
+      <div class="unet-expanded-wrapper">
+        <div id="unet-expanded-header" class="unet-expanded-header" style="display: none; align-items: center; gap: 8px; margin-bottom: 6px;">
+          <button
+            id="refresh-model-btn"
+            class="unet-refresh-btn"
+            data-tooltip="Refresh model structure: Re-load layer data from the connected ComfyUI workflow (e.g. after changing models)"
+            onclick="refreshModelStructure()"
+          >↻</button>
+        </div>
+        <div id="unet-expanded"></div>
+        <div id="unet-steps-controls" class="unet-steps-controls" style="display: none;">
+          <label class="unet-steps-label">Bend timesteps:</label>
+          <input type="number" id="steps-min" class="unet-steps-input" min="0" max="999" placeholder="min" title="Min denoising step (0 = first step)">
+          <span class="unet-steps-sep">–</span>
+          <input type="number" id="steps-max" class="unet-steps-input" min="0" max="999" placeholder="max" title="Max denoising step (leave empty for all)">
+          <span class="unet-steps-hint">(empty = all steps)</span>
+          <button type="button" id="steps-reset-btn" class="unet-steps-reset-btn" data-tooltip="Reset to all steps" title="Reset to all steps">Reset</button>
+        </div>
+        <div id="output_params">
+          <span id="output_params_text"></span>
+          <button id="copy-bends-btn" type="button" class="copy-bends-btn" data-tooltip="Copy bends as JSON to clipboard" style="display: none">📋</button>
+        </div>
+      </div>
+      <div id="main-resizer" class="main-resizer" role="separator" aria-orientation="vertical" title="Drag to resize"></div>
+      <div id="right-column">
+        <div id="image-container">
+          <div id="comfy-error-banner" class="comfy-error-banner" style="display: none;" role="alert">
+            <span id="comfy-error-text"></span>
+            <button type="button" id="comfy-error-dismiss" class="comfy-error-dismiss" title="Dismiss">×</button>
+          </div>
+          <div id="comfy-queue-controls" style="display: none; gap: 8px; align-items: center; margin-bottom: 6px; flex-wrap: wrap;">
+            <span class="queue-mode" style="display: inline-flex; gap: 8px;">
+              <label style="cursor: pointer;"><input type="radio" name="queue_mode" value="live" checked> Live</label>
+              <label style="cursor: pointer;"><input type="radio" name="queue_mode" value="on_demand"> On-demand</label>
+            </span>
+            <button id="queue-prompt-btn" type="button" class="btn-primary" style="padding: 4px 10px;">Queue</button>
+            <button id="clear-all-bends-btn" type="button" style="padding: 4px 10px;">Clear all</button>
+          </div>
+          <div id="output_image_wrap">
+            <div id="comfy-progress-bar" style="display: none; margin-bottom: 10px; height: 6px; background: rgba(0,0,0,0.1); overflow: hidden; border-radius: 3px;">
+              <div class="comfy-progress-bar-fill"></div>
+            </div>
+            <div class="preview-with-hover-zoom">
+              <div id="output_image"><div id="default_image"></div></div>
+              <div id="output_image_zoom" class="preview-zoom-overlay" aria-hidden="true"></div>
+            </div>
+          </div>
+          <div id="comfy-history-strip" class="comfy-history-strip" style="display: none;"></div>
+        </div>
+        <div id="left-panel">
+          <div id="info-parent-panel">
+            <div class="info-panel-header">
+              <span>
+                <strong>Read Here:</strong>
+                <span class="info-panel-hint"> Click on diagram components to learn more.</span>
+              </span>
+              <button
+                id="info-panel-close"
+                class="info-panel-close-btn"
+                title="Close info panel"
+              >
+                ×
+              </button>
+            </div>
+            <div id="info-panel">
+              <span id="info-general">
+                <p>
+                  Like most sophisticated technologies, AI models are often
+                  "black boxes" that hide their complexity. But unlike many
+                  technologies that can be opened, adapted, and hacked, AI
+                  systems remain closed to most.
+                </p>
+                <p>
+                  This demo invites you to open one of these boxes. It allows
+                  you to pick parts of the generation process behind Latent
+                  Diffusion—the core technology that powers models like Stable
+                  Diffusion. You can manipulate (or <i>bend</i>) key components
+                  like the U-Net, the engine that learns how to turn random
+                  noise into a cohesive image.
+                </p>
+                <p>
+                  By bending these parts, we invite you to develop a better
+                  intuitive understanding of how these models work and to
+                  reflect on the new creative potential that these manipulations
+                  unlock.
+                </p>
+                <p>
+                  The diagram below shows the entire latent diffusion process;
+                  click on each part to learn more about it. Click anywhere to
+                  return to start. Currently, we support manipulating the
+                  <b style="background-color: #ff7f0e">U-Net</b> component.
+                </p>
+              </span>
+              <span id="info-unet">
+                <p>
+                  The U-Net is the core neural network in the diffusion process.
+                  It takes noisy latents and predicts how to remove some of the
+                  noise at each step, guided by the text embeddings. Over many
+                  steps, this gradually shapes the noise into a clear image.
+                </p>
+                <p>
+                  The U-Net is comprised of input, middle and output blocks
+                  which can be visualized in a U shape. Each block contains
+                  multiple layers e.g. ( _____ . 0.in_layers.2 ). The dashed
+                  lines are skip connections. During UNet training and
+                  inference, they recover fine-grained details by combining
+                  low-level features from the input/encoding blocks with high-level
+                  feature maps from the output/decoding blocks.
+                </p>
+                <p>
+                  <i>Bending</i> layers of the U-Net involves transforming the
+                  outputs of a chosen layer, specifically here by rotating the
+                  layer's output by a certain angle (0°, 90°, 180°, 270°).
+                </p>
+                <p>
+                  <b style="background-color: #ff7f0e">Bending Instructions:</b>
+                  Click on a block to expand it. Inside the block, drag the
+                  slider of the layer you wish to <em>bend</em>. The more you
+                  drag the stronger the bending. Release and the layer will be
+                  unbent gradually. ↓↓
+                </p>
+
+                <img id="unet-tutorial" src="assets/bending_tutorial.gif" />
+              </span>
+              <span id="info-clip">
+                <p>
+                  CLIP (Contrastive Language–Image Pre-training) is an AI model
+                  that learns how images and text relate by mapping them into a
+                  shared “embedding space.” Trained on millions of image–caption
+                  pairs from the internet, it can match pictures with their
+                  best-fitting descriptions or find the right text for an image.
+                  It's composed of a text encoder (text --> embedding) and an
+                  image encoder (image --> embedding).
+                </p>
+                <p>
+                  In latent diffusion, CLIP's role is to steer the image
+                  generation process. When you provide a text prompt, CLIP's
+                  text encoder converts your words into a numerical vector (a
+                  "text embedding"). This embedding is used to condition or
+                  steer the generation towards a final image is match your text
+                  prompt.
+                </p>
+              </span>
+
+              <span id="info-latents">
+                <p>
+                  Latents are compressed versions of images that live in a
+                  smaller “latent space.” The model works here instead of
+                  directly on pixels to make generation faster and more
+                  efficient.
+                </p>
+              </span>
+
+              <span id="info-text_conditioned_latents">
+                <p>
+                  Text-conditioned latents are the evolving image
+                  representations that are guided by the meaning of your text
+                  prompt as noise is gradually removed.
+                </p>
+              </span>
+
+              <span id="info-scheduler">
+                <p></p>
+                <p>
+                  In the latent diffusion process, these components work
+                  together in a loop. The Scheduler acts as the planner,
+                  dividing the total number of timesteps (for example, 20) into
+                  a step-by-step itinerary for moving from pure noise to a clear
+                  image. It defines the noise level and adjustment size for each
+                  stage, balancing generation speed (fewer, larger steps) with
+                  image quality (more, smaller steps).
+                </p>
+                <p>
+                  At each timestep, the U-Net serves as the noise predictor. It
+                  looks at the current noisy latent image, along with the text
+                  guidance (from the text encoder, often based on CLIP), and
+                  predicts which parts of the image are noise.
+                </p>
+                <p>
+                  The Sampler is the executor (e.g., DDIM, DPM-Solver, Euler).
+                  It combines the U-Net’s noise prediction with the Scheduler’s
+                  plan to perform the actual math that removes noise and moves
+                  the latent image closer to clarity.
+                </p>
+                <p>
+                  This loop repeats until the final image emerges from the
+                  noise.
+                </p>
+              </span>
+
+              <span id="info-text_embeddings">
+                <p>
+                  Text embeddings are the numerical representations of your
+                  prompt that tell the model what kind of image to create.
+                </p>
+              </span>
+
+              <span id="info-latent_seed_noise">
+                <p>
+                  Latent seed noise is the random starting pattern in latent
+                  space. The seed number determines the initial noise and
+                  affects the final image output. In the case of image to image
+                  generation (e.g., transforming a sketch to a detailed image),
+                  this is replaced by the result of passing an input image to
+                  the VAE to obtain an initial latent.
+                </p>
+              </span>
+
+              <span id="info-variational_autoencoder_vae">
+                <p>
+                  The Variational Autoencoder (VAE) converts between latent
+                  space and image space. It encodes images into latents and
+                  decodes latents back into viewable images.
+                </p>
+              </span>
+              <span id="info-flux" style="display: none;">
+                <p>Flux-style models use a different architecture from classic Stable Diffusion. Key parts include <b>txt_in</b>, <b>img_in</b>, <b>time_in</b>, and <b>vector_in</b> for inputs; <b>single_blocks</b> and <b>double_blocks</b> for the main backbone; and <b>final_layer</b> for output. Use the model part dropdown above to select which part to visualize and bend (e.g. single_blocks).</p>
+              </span>
+              <span id="info-unknown" style="display: none;">
+                <p>This model type does not have a pre-defined process diagram. Use the model part dropdown in the layer view to select a top-level part of the model to explore and bend.</p>
+              </span>
+            </div>
+          </div>
+          <div id="diagram-resizer" class="diagram-resizer" role="separator" aria-orientation="horizontal" title="Drag to resize diagram"></div>
+        <div id="diagram-generic-message" style="display: none; padding: 12px; background: #f5f5f5; border-radius: 8px; margin-bottom: 8px; font-size: 14px;">
+          Generic model: select a part above to explore and bend layers.
+        </div>
+        <div id="diagram-container">
+          <!-- SVG content will be loaded here -->
+          <svg
+            id="svg-diagram"
+            width="450"
+            height="300"
+            viewBox="0 0 450 300"
+          ></svg>
+        </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="js/config.js"></script>
+    <script src="js/utils.js"></script>
+    <script src="js/svg-connector.js"></script>
+    <script src="js/unet-visualizer.js"></script>
+    <script src="js/viewcomfyapi.js"></script>
+    <script src="js/image-manager.js"></script>
+    <script src="js/main.js"></script>
+  </body>
+</html>

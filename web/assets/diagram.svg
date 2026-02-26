@@ -1,0 +1,896 @@
+          <svg
+            id="svg-diagram"
+            viewbox="0 0 500 350"
+            preserveAspectRatio="xMidYMid meet"
+          >
+            <defs id="defs2">
+              <rect
+                x="1133.3315"
+                y="243.21397"
+                width="129.10797"
+                height="45.460556"
+                id="rect16838"
+              ></rect>
+              <rect
+                x="-18.001461"
+                y="-367.74414"
+                width="186.4437"
+                height="77.149117"
+                id="rect3560"
+              ></rect>
+              <rect
+                x="-18.001461"
+                y="-367.74414"
+                width="186.4437"
+                height="77.149117"
+                id="rect3560-0"
+              ></rect>
+              <rect
+                x="-18.001461"
+                y="-367.74414"
+                width="186.4437"
+                height="77.149117"
+                id="rect6955"
+              ></rect>
+              <rect
+                x="-18.001461"
+                y="-367.74414"
+                width="367.34781"
+                height="323.73535"
+                id="rect7366"
+              ></rect>
+              <rect
+                x="-18.001461"
+                y="-367.74414"
+                width="367.34781"
+                height="323.73535"
+                id="rect20716"
+              ></rect>
+              <rect
+                x="1133.3315"
+                y="243.21397"
+                width="129.10797"
+                height="45.460556"
+                id="rect20718"
+              ></rect>
+              <rect
+                x="-18.001461"
+                y="-367.74414"
+                width="290.35291"
+                height="108.63676"
+                id="rect24619"
+              ></rect>
+              <rect
+                x="-18.001461"
+                y="-367.74414"
+                width="290.35291"
+                height="108.63676"
+                id="rect30209"
+              ></rect>
+              <rect
+                x="-18.001461"
+                y="-367.74414"
+                width="290.35291"
+                height="108.63676"
+                id="rect30557"
+              ></rect>
+              <rect
+                x="-18.001461"
+                y="-367.74414"
+                width="186.4437"
+                height="77.149117"
+                id="rect33569"
+              ></rect>
+              <rect
+                x="-18.001461"
+                y="-367.74414"
+                width="186.4437"
+                height="77.149117"
+                id="rect34847"
+              ></rect>
+              <rect
+                x="-18.001461"
+                y="-367.74414"
+                width="291.64639"
+                height="138.3782"
+                id="rect34853"
+              ></rect>
+              <rect
+                x="-18.001461"
+                y="-367.74414"
+                width="317.29724"
+                height="169.06577"
+                id="rect38688"
+              ></rect>
+            </defs>
+            <g>
+              <g
+                transform="matrix(0.98182278,0,0,0.98182278,-1.3820406,13.376656)"
+              >
+                <g
+                  id="clip"
+                  transform="translate(146.96907,107.50515)"
+                  class="clickable"
+                >
+                  <rect
+                    style="
+                      fill: #ffffff;
+                      stroke: #000000;
+                      stroke-width: 1.24921;
+                    "
+                    id="rect962"
+                    width="70.290962"
+                    height="58.508732"
+                    x="85.797821"
+                    y="-116.74986"
+                    ry="11.226804"
+                  ></rect>
+                  <text
+                    xml:space="preserve"
+                    transform="matrix(0.34590156,0,0,0.34590156,94.841876,31.481771)"
+                    id="text3558"
+                    style="
+                      font-style: normal;
+                      font-weight: normal;
+                      font-size: 40px;
+                      line-height: 1.25;
+                      font-family: sans-serif;
+                      white-space: pre;
+                      shape-inside: url(#rect3560);
+                      fill: #000000;
+                      fill-opacity: 1;
+                      stroke: none;
+                    "
+                  >
+                    <tspan x="-500" y="-332.35352" id="tspan56628">
+                      <tspan
+                        style="
+                          text-align: center;
+                          baseline-shift: baseline;
+                          text-anchor: middle;
+                        "
+                        id="tspan56626"
+                      >
+                        CLIP
+                      </tspan>
+                    </tspan>
+                  </text>
+                </g>
+                <text
+                  xml:space="preserve"
+                  style="
+                    font-style: normal;
+                    font-weight: normal;
+                    font-size: 9.87778px;
+                    line-height: 1.25;
+                    font-family: sans-serif;
+                    fill: #000000;
+                    fill-opacity: 1;
+                    stroke: none;
+                    stroke-width: 0.264583;
+                  "
+                  x="-14.96911"
+                  y="23.13402"
+                  id="text32068"
+                >
+                  <tspan
+                    id="prompt_text"
+                    style="font-size: 9.87778px; stroke-width: 0.264583"
+                    x="0"
+                    y="23.13402"
+                  >
+                    Prompt
+                  </tspan>
+                </text>
+                <g
+                  id="unet"
+                  transform="matrix(1.5408417,0,0,1.5408417,81.773788,327.54351)"
+                  class="clickable"
+                >
+                  <rect
+                    style="
+                      fill: #ffffff;
+                      stroke: #000000;
+                      stroke-width: 1.24921;
+                    "
+                    id="rect962-1"
+                    width="70.290962"
+                    height="58.508732"
+                    x="85.797821"
+                    y="-116.74986"
+                    ry="11.226804"
+                  ></rect>
+                  <text
+                    xml:space="preserve"
+                    transform="matrix(0.34590156,0,0,0.34590156,94.841876,31.481771)"
+                    id="text3558-4"
+                    style="
+                      font-style: normal;
+                      font-weight: bold;
+                      font-size: 40px;
+                      line-height: 1.25;
+                      font-family: sans-serif;
+                      text-align: center;
+                      white-space: pre;
+                      shape-inside: url(#rect3560-0);
+                      fill: #000000;
+                      fill-opacity: 1;
+                      stroke: none;
+                    "
+                  >
+                    <tspan x="18" y="-332.35352" id="tspan56630">UNet</tspan>
+                  </text>
+                </g>
+                <g
+                  transform="matrix(0.62471165,0,0,0.62471165,65.566418,247.54279)"
+                >
+                  <g id="latents" class="clickable">
+                    <rect
+                      style="
+                        fill: #ffffff;
+                        stroke: #000000;
+                        stroke-width: 1.24921;
+                      "
+                      id="rect6945"
+                      width="70.290962"
+                      height="58.508732"
+                      x="88.520729"
+                      y="-124.374"
+                      ry="11.226804"
+                    ></rect>
+                    <text
+                      xml:space="preserve"
+                      transform="matrix(0.34590156,0,0,0.34590156,98.109363,-21.3426)"
+                      id="text6951"
+                      style="
+                        font-style: normal;
+                        font-weight: normal;
+                        font-size: 45.7117px;
+                        line-height: 1.25;
+                        font-family: sans-serif;
+                        text-align: center;
+                        white-space: pre;
+                        shape-inside: url(#rect6955);
+                        fill: #000000;
+                        fill-opacity: 1;
+                        stroke: none;
+                      "
+                      x="115.60791"
+                      y="0"
+                    >
+                      <tspan x="0" y="-327.3" id="tspan56632">Latents</tspan>
+                    </text>
+                  </g>
+                </g>
+                <g
+                  transform="matrix(0.62471165,0,0,0.62471165,331.26745,248.90361)"
+                >
+                  <g id="text_conditioned_latents" class="clickable">
+                    <rect
+                      style="
+                        fill: #ffffff;
+                        stroke: #000000;
+                        stroke-width: 1.24921;
+                      "
+                      id="rect7356"
+                      width="70.290962"
+                      height="58.508732"
+                      x="90.638657"
+                      y="-121.87099"
+                      ry="11.226804"
+                    ></rect>
+                    <text
+                      xml:space="preserve"
+                      transform="matrix(0.38241497,0,0,0.38241497,66.339752,-50.231733)"
+                      id="text7360"
+                      style="
+                        font-style: normal;
+                        font-weight: normal;
+                        font-size: 41.3471px;
+                        line-height: 1.25;
+                        font-family: sans-serif;
+                        text-align: center;
+                        white-space: pre;
+                        shape-inside: url(#rect7366);
+                        fill: #000000;
+                        fill-opacity: 1;
+                        stroke: none;
+                      "
+                      x="115.60791"
+                      y="0"
+                    >
+                      <tspan x="-160" y="-331.16165" id="tspan56634">
+                        Text
+                      </tspan>
+                      <tspan x="-230" y="-279.47778" id="tspan56636">
+                        Conditioned
+                      </tspan>
+                      <tspan x="-180" y="-227.79391" id="tspan56638">
+                        Latents
+                      </tspan>
+                    </text>
+                    <text
+                      xml:space="preserve"
+                      transform="matrix(0.42352873,0,0,0.42352873,-295.01352,-226.34196)"
+                      id="text16836"
+                      style="
+                        font-style: normal;
+                        font-weight: normal;
+                        font-size: 40px;
+                        line-height: 1.25;
+                        font-family: sans-serif;
+                        white-space: pre;
+                        shape-inside: url(#rect16838);
+                        fill: #000000;
+                        fill-opacity: 1;
+                        stroke: none;
+                      "
+                    ></text>
+                  </g>
+                </g>
+                <g
+                  transform="matrix(0.62471165,0,0,0.62471165,206.07158,376.82113)"
+                >
+                  <g>
+                    <g
+                      id="schedueler"
+                      transform="translate(0,-42.477329)"
+                      class="clickable"
+                    >
+                      <rect
+                        style="
+                          fill: #ffffff;
+                          stroke: #000000;
+                          stroke-width: 1.5678;
+                        "
+                        id="rect20702"
+                        width="141.6235"
+                        height="45.740082"
+                        x="26.952641"
+                        y="-117.79324"
+                        ry="8.776722"
+                      ></rect>
+                      <text
+                        xml:space="preserve"
+                        transform="matrix(0.34590156,0,0,0.34590156,40.299717,24.081263)"
+                        id="text20706"
+                        style="
+                          font-style: normal;
+                          font-weight: normal;
+                          font-size: 45.7117px;
+                          line-height: 1.25;
+                          font-family: sans-serif;
+                          text-align: center;
+                          white-space: pre;
+                          shape-inside: url(#rect20716);
+                          fill: #000000;
+                          fill-opacity: 1;
+                          stroke: none;
+                        "
+                      >
+                        <tspan x="-280" y="-327.3" id="tspan56640">
+                          Schedueler
+                        </tspan>
+                      </text>
+                    </g>
+                    <text
+                      xml:space="preserve"
+                      transform="matrix(0.42352873,0,0,0.42352873,-295.01352,-226.34196)"
+                      id="text20710"
+                      style="
+                        font-style: normal;
+                        font-weight: normal;
+                        font-size: 40px;
+                        line-height: 1.25;
+                        font-family: sans-serif;
+                        white-space: pre;
+                        shape-inside: url(#rect20718);
+                        fill: #000000;
+                        fill-opacity: 1;
+                        stroke: none;
+                      "
+                    ></text>
+                  </g>
+                </g>
+                <g
+                  transform="matrix(0.62471165,0,0,0.62471165,177.49426,157.15113)"
+                >
+                  <g>
+                    <g id="text_embeddings" class="clickable">
+                      <rect
+                        style="
+                          fill: #ffffff;
+                          stroke: #000000;
+                          stroke-width: 1.55675;
+                          stroke-miterlimit: 4;
+                          stroke-dasharray: 3.1135, 1.55675;
+                          stroke-dashoffset: 0;
+                        "
+                        id="rect24609"
+                        width="109.73785"
+                        height="58.201191"
+                        x="88.6745"
+                        y="-124.22023"
+                        ry="11.167791"
+                      ></rect>
+                      <text
+                        xml:space="preserve"
+                        transform="matrix(0.34590156,0,0,0.34590156,-8.3562513,11.332269)"
+                        id="text24613"
+                        style="
+                          font-style: normal;
+                          font-weight: normal;
+                          font-size: 45.7117px;
+                          line-height: 1.25;
+                          font-family: sans-serif;
+                          text-align: center;
+                          white-space: pre;
+                          shape-inside: url(#rect24619);
+                          fill: #000000;
+                          fill-opacity: 1;
+                          stroke: none;
+                        "
+                        x="115.60791"
+                        y="0"
+                      >
+                        <tspan x="400" y="-327.3" id="tspan56642">Text</tspan>
+                        <tspan x="-20" y="-270.16038" id="tspan56644">
+                          Embeddings
+                        </tspan>
+                      </text>
+                      <!--
+                    <text
+                      xml:space="preserve"
+                      transform="matrix(0.34590156,0,0,0.34590156,173.26156,26.035959)"
+                      id="text30207"
+                      style="
+                        font-style: normal;
+                        font-weight: normal;
+                        font-size: 40px;
+                        line-height: 1.25;
+                        font-family: sans-serif;
+                        text-align: center;
+                        white-space: pre;
+                        shape-inside: url(#rect30209);
+                        fill: #000000;
+                        fill-opacity: 1;
+                        stroke: none;
+                      "
+                      x="115.60791"
+                      y="0"
+                    >
+                      <tspan x="101.72559" y="-332.35352" id="tspan56646">
+                        77
+                      </tspan>
+                    </text>
+                    <text
+                      xml:space="preserve"
+                      transform="matrix(0.34590156,0,0,0.34590156,125.883,-13.446174)"
+                      id="text30555"
+                      style="
+                        font-style: normal;
+                        font-weight: normal;
+                        font-size: 40px;
+                        line-height: 1.25;
+                        font-family: sans-serif;
+                        text-align: center;
+                        white-space: pre;
+                        shape-inside: url(#rect30557);
+                        fill: #000000;
+                        fill-opacity: 1;
+                        stroke: none;
+                      "
+                      x="115.60791"
+                      y="0"
+                    >
+                      <tspan x="89.000977" y="-332.35352" id="tspan56648">
+                        768
+                      </tspan>
+                    </text>-->
+                    </g>
+                  </g>
+                </g>
+                <g id="g32915" transform="translate(146.28866,108.86598)">
+                  <path
+                    style="
+                      fill: none;
+                      stroke: #000000;
+                      stroke-width: 1.5;
+                      stroke-linecap: butt;
+                      stroke-linejoin: miter;
+                      stroke-miterlimit: 4;
+                      stroke-dasharray: none;
+                      stroke-opacity: 1;
+                    "
+                    d="M -41.845359,-88.113401 H 70.039948"
+                    id="path32501"
+                  ></path>
+                  <path
+                    style="
+                      fill: #000000;
+                      stroke: #000000;
+                      stroke-width: 0.264583px;
+                      stroke-linecap: butt;
+                      stroke-linejoin: miter;
+                      stroke-opacity: 1;
+                    "
+                    d="m 69.742266,-91.175257 0.08505,6.378866 6.719073,-3.31701 z"
+                    id="path32813"
+                  ></path>
+                </g>
+                <g id="g33232" transform="rotate(90,88.610413,89.905314)">
+                  <path
+                    style="
+                      fill: none;
+                      stroke: #000000;
+                      stroke-width: 1.4669;
+                      stroke-linecap: butt;
+                      stroke-linejoin: miter;
+                      stroke-miterlimit: 4;
+                      stroke-dasharray: none;
+                      stroke-opacity: 1;
+                    "
+                    d="m 49.154788,-88.113401 h 20.88516"
+                    id="path33228"
+                  ></path>
+                  <path
+                    style="
+                      fill: #000000;
+                      stroke: #000000;
+                      stroke-width: 0.264583px;
+                      stroke-linecap: butt;
+                      stroke-linejoin: miter;
+                      stroke-opacity: 1;
+                    "
+                    d="m 69.742266,-91.175257 0.08505,6.378866 6.719073,-3.31701 z"
+                    id="path33230"
+                  ></path>
+                </g>
+                <g id="g33238" transform="rotate(90,54.589793,122.90531)">
+                  <path
+                    style="
+                      fill: none;
+                      stroke: #000000;
+                      stroke-width: 1.4669;
+                      stroke-linecap: butt;
+                      stroke-linejoin: miter;
+                      stroke-miterlimit: 4;
+                      stroke-dasharray: none;
+                      stroke-opacity: 1;
+                    "
+                    d="m 49.154788,-88.113401 h 20.88516"
+                    id="path33234"
+                  ></path>
+                  <path
+                    style="
+                      fill: #000000;
+                      stroke: #000000;
+                      stroke-width: 0.264583px;
+                      stroke-linecap: butt;
+                      stroke-linejoin: miter;
+                      stroke-opacity: 1;
+                    "
+                    d="m 69.742266,-91.175257 0.08505,6.378866 6.719073,-3.31701 z"
+                    id="path33236"
+                  ></path>
+                </g>
+                <g id="g33334" transform="translate(305.84536,277.60824)">
+                  <path
+                    style="
+                      fill: none;
+                      stroke: #000000;
+                      stroke-width: 1.5;
+                      stroke-linecap: butt;
+                      stroke-linejoin: miter;
+                      stroke-miterlimit: 4;
+                      stroke-dasharray: 10;
+                      stroke-opacity: 1;
+                    "
+                    d="M 20.072167,-88.113401 H 70.039948"
+                    id="path33240"
+                  >
+                    <animate
+                      attributeName="stroke-dashoffset"
+                      values="100;0"
+                      dur="3s"
+                      calcMode="linear"
+                      repeatCount="indefinite"
+                    />
+                  </path>
+                  <path
+                    style="
+                      fill: #000000;
+                      stroke: #000000;
+                      stroke-width: 0.264583px;
+                      stroke-linecap: butt;
+                      stroke-linejoin: miter;
+                      stroke-opacity: 1;
+                    "
+                    d="m 69.742266,-91.175257 0.08505,6.378866 6.719073,-3.31701 z"
+                    id="path33242"
+                  ></path>
+                </g>
+                <g id="g33334-3" transform="translate(413.87589,278.83868)">
+                  <g id="g33545" transform="translate(-18.371134)">
+                    <path
+                      style="
+                        fill: none;
+                        stroke: #000000;
+                        stroke-width: 1.5;
+                        stroke-linecap: butt;
+                        stroke-linejoin: miter;
+                        stroke-miterlimit: 4;
+                        stroke-dasharray: none;
+                        stroke-opacity: 1;
+                      "
+                      d="m 38.443301,-87.773195 31.596647,-0.340206"
+                      id="path33240-8"
+                    ></path>
+                    <path
+                      style="
+                        fill: #000000;
+                        stroke: #000000;
+                        stroke-width: 0.264583px;
+                        stroke-linecap: butt;
+                        stroke-linejoin: miter;
+                        stroke-opacity: 1;
+                      "
+                      d="m 69.742266,-91.175257 0.08505,6.378866 6.719073,-3.31701 z"
+                      id="path33242-5"
+                    ></path>
+                  </g>
+                  <g id="g33545" transform="translate(70)">
+                    <path
+                      style="
+                        fill: none;
+                        stroke: #000000;
+                        stroke-width: 1.5;
+                        stroke-linecap: butt;
+                        stroke-linejoin: miter;
+                        stroke-miterlimit: 4;
+                        stroke-dasharray: none;
+                        stroke-opacity: 1;
+                      "
+                      d="m 38.443301,-87.773195 75,-0.340206"
+                      id="path33240-8"
+                    ></path>
+                    <path
+                      style="
+                        fill: #000000;
+                        stroke: #000000;
+                        stroke-width: 0.264583px;
+                        stroke-linecap: butt;
+                        stroke-linejoin: miter;
+                        stroke-opacity: 1;
+                      "
+                      d="m 113.443301,-91.175257 0.08505,6.378866 6.719073,-3.31701 z"
+                      id="path33242-5"
+                    ></path>
+                  </g>
+                  <g id="g33551" transform="translate(-284.07216,-2.0412371)">
+                    <path
+                      style="
+                        fill: none;
+                        stroke: #000000;
+                        stroke-width: 1.5;
+                        stroke-linecap: butt;
+                        stroke-linejoin: miter;
+                        stroke-miterlimit: 4;
+                        stroke-dasharray: 10;
+                        stroke-opacity: 1;
+                      "
+                      d="m 38.443301,-87.773195 31.596647,-0.340206"
+                      id="path33547"
+                    >
+                      <animate
+                        attributeName="stroke-dashoffset"
+                        values="100;0"
+                        dur="3s"
+                        calcMode="linear"
+                        repeatCount="indefinite"
+                      />
+                    </path>
+                    <path
+                      style="
+                        fill: #000000;
+                        stroke: #000000;
+                        stroke-width: 0.264583px;
+                        stroke-linecap: butt;
+                        stroke-linejoin: miter;
+                        stroke-opacity: 1;
+                      "
+                      d="m 69.742266,-91.175257 0.08505,6.378866 6.719073,-3.31701 z"
+                      id="path33549"
+                    ></path>
+                  </g>
+                  <g id="g33557" transform="translate(-376.26804,-2.3814433)">
+                    <path
+                      style="
+                        fill: none;
+                        stroke: #000000;
+                        stroke-width: 1.5;
+                        stroke-linecap: butt;
+                        stroke-linejoin: miter;
+                        stroke-miterlimit: 4;
+                        stroke-dasharray: none;
+                        stroke-opacity: 1;
+                      "
+                      d="m 38.443301,-87.773195 31.596647,-0.340206"
+                      id="path33553"
+                    ></path>
+                    <path
+                      style="
+                        fill: #000000;
+                        stroke: #000000;
+                        stroke-width: 0.264583px;
+                        stroke-linecap: butt;
+                        stroke-linejoin: miter;
+                        stroke-opacity: 1;
+                      "
+                      d="m 69.742266,-91.175257 0.08505,6.378866 6.719073,-3.31701 z"
+                      id="path33555"
+                    ></path>
+                  </g>
+                </g>
+                <g
+                  transform="matrix(0.62471165,0,0,0.62471165,-41.258332,249.24382)"
+                >
+                  <g id="latent_seed_noise" class="clickable">
+                    <rect
+                      style="
+                        fill: #ffffff;
+                        stroke: #000000;
+                        stroke-width: 1.24921;
+                      "
+                      id="rect33559"
+                      width="70.290962"
+                      height="58.508732"
+                      x="88.520729"
+                      y="-124.374"
+                      ry="11.226804"
+                    ></rect>
+                    <text
+                      xml:space="preserve"
+                      transform="matrix(0.34590156,0,0,0.34590156,79.048051,82.435657)"
+                      id="text34851"
+                      style="
+                        font-style: normal;
+                        font-weight: normal;
+                        font-size: 45.7117px;
+                        line-height: 1.25;
+                        font-family: sans-serif;
+                        text-align: center;
+                        white-space: pre;
+                        shape-inside: url(#rect34853);
+                        fill: #000000;
+                        fill-opacity: 1;
+                        stroke: none;
+                      "
+                    >
+                      <tspan x="-300" y="-370" id="tspan56650">
+                        Latent Seed
+                      </tspan>
+                      <tspan x="50" y="-310" id="tspan56652">(noise)</tspan>
+                    </text>
+                  </g>
+                </g>
+                <g id="g37690" transform="matrix(-1,0,0,1,396.7057,379.42357)">
+                  <g id="g38287">
+                    <path
+                      style="
+                        fill: none;
+                        stroke: #000000;
+                        stroke-width: 1.5;
+                        stroke-linecap: butt;
+                        stroke-linejoin: miter;
+                        stroke-miterlimit: 4;
+                        stroke-dasharray: 10;
+                        stroke-opacity: 1;
+                      "
+                      d="m -16.58505,-162.02319 -0.144743,73.378502 86.769741,0.531287"
+                      id="path37686"
+                    >
+                      <animate
+                        attributeName="stroke-dashoffset"
+                        values="100;0"
+                        dur="3s"
+                        calcMode="linear"
+                        repeatCount="indefinite"
+                      />
+                    </path>
+                    <path
+                      style="
+                        fill: #000000;
+                        stroke: #000000;
+                        stroke-width: 0.264583px;
+                        stroke-linecap: butt;
+                        stroke-linejoin: miter;
+                        stroke-opacity: 1;
+                      "
+                      d="m 69.742266,-91.175257 0.08505,6.378866 6.719073,-3.31701 z"
+                      id="path37688"
+                    ></path>
+                  </g>
+                  <g id="g38287-1" transform="rotate(-90,118.75256,-224.06491)">
+                    <g id="g38574">
+                      <path
+                        style="
+                          fill: none;
+                          stroke: #000000;
+                          stroke-width: 1.5;
+                          stroke-linecap: butt;
+                          stroke-linejoin: miter;
+                          stroke-miterlimit: 4;
+                          stroke-dasharray: 10;
+                          stroke-opacity: 1;
+                        "
+                        d="m -16.58505,-162.02319 -0.144743,73.378502 62.615102,0.02098"
+                        id="path37686-5"
+                      >
+                        <animate
+                          attributeName="stroke-dashoffset"
+                          values="100;0"
+                          dur="3s"
+                          calcMode="linear"
+                          repeatCount="indefinite"
+                        />
+                      </path>
+                      <path
+                        style="
+                          fill: #000000;
+                          stroke: #000000;
+                          stroke-width: 0.264583px;
+                          stroke-linecap: butt;
+                          stroke-linejoin: miter;
+                          stroke-opacity: 1;
+                        "
+                        d="m 45.885309,-91.728089 0.08505,6.378866 6.719073,-3.31701 z"
+                        id="path37688-9"
+                      ></path>
+                    </g>
+                  </g>
+                </g>
+                <g
+                  id="variational_autoencoder_vae"
+                  transform="matrix(1.5408417,0,0,1.5408417,337.73186,325.61901)"
+                  class="clickable"
+                >
+                  <path
+                    id="rect38678"
+                    style="
+                      fill: #ffffff;
+                      stroke: #000000;
+                      stroke-width: 1.24921;
+                    "
+                    d="m 88.139678,-98.483372 33.757982,-17.641988 0.46837,59.757715 -34.538599,-18.890983 z"
+                  ></path>
+                  <text
+                    xml:space="preserve"
+                    transform="matrix(0.1766422,0,0,0.1766422,79.571256,11.76899)"
+                    id="text38684"
+                    style="
+                      font-style: normal;
+                      font-weight: normal;
+                      font-size: 40px;
+                      line-height: 1.25;
+                      font-family: sans-serif;
+                      text-align: center;
+                      white-space: pre;
+                      shape-inside: url(#rect38688);
+                      fill: #000000;
+                      fill-opacity: 1;
+                      stroke: none;
+                    "
+                  >
+                    <tspan x="-150" y="-332.35352" id="tspan56654">
+                      Variational
+                    </tspan>
+                    <tspan x="-170" y="-282.35352" id="tspan56656">
+                      Autoencoder
+                    </tspan>
+                    <tspan x="150" y="-232.35352" id="tspan56658">(VAE)</tspan>
+                  </text>
+                </g>
+              </g>
+            </g>
+          </svg>

@@ -1,0 +1,134 @@
+{
+  "1": {
+    "inputs": {
+      "seed": 42,
+      "steps": 20,
+      "cfg": 7,
+      "sampler_name": "dpmpp_2m",
+      "scheduler": "karras",
+      "denoise": 1,
+      "model": [
+        "14",
+        0
+      ],
+      "positive": [
+        "2",
+        0
+      ],
+      "negative": [
+        "3",
+        0
+      ],
+      "latent_image": [
+        "10",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "2": {
+    "inputs": {
+      "text": "Analog style portrait of a person",
+      "clip": [
+        "4",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Prompt)"
+    }
+  },
+  "3": {
+    "inputs": {
+      "text": "",
+      "clip": [
+        "4",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Prompt)"
+    }
+  },
+  "4": {
+    "inputs": {
+      "ckpt_name": "realisticVisionV51_v51VAE.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": {
+      "title": "Load Checkpoint"
+    }
+  },
+  "7": {
+    "inputs": {
+      "images": [
+        "34",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  },
+  "10": {
+    "inputs": {
+      "width": 512,
+      "height": 512,
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": {
+      "title": "Empty Latent Image"
+    }
+  },
+  "14": {
+    "inputs": {
+      "session_id": "b6d27561-cfb8-42a2-b759-8e527c1ef5c5",
+      "selection_hash": "7fa23d927b688e31b29f21f99df2e41756e2e8b8d8f1a77a55936e3d5ebba025|(None, None, 200)",
+      "Open Layer Picker": null,
+      "model": [
+        "4",
+        0
+      ]
+    },
+    "class_type": "InteractiveBendingWebUI",
+    "_meta": {
+      "title": "Interactive Bending WebUI"
+    }
+  },
+  "34": {
+    "inputs": {
+      "samples": [
+        "1",
+        0
+      ],
+      "vae": [
+        "4",
+        2
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "37": {
+    "inputs": {
+      "filename_prefix": "latents/ComfyUI",
+      "samples": [
+        "1",
+        0
+      ]
+    },
+    "class_type": "SaveLatent",
+    "_meta": {
+      "title": "SaveLatent"
+    }
+  }
+}
