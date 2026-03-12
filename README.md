@@ -1,6 +1,9 @@
 # ComfyUI Model Bending
 
-A ComfyUI custom node that provides **model bending** for diffusion models (e.g. Stable Diffusion, Flux). Model bending is the manipulation of the model activations at different chosen parts during sampling. Useful for creating experimential variations on an output or for testing out and understanding how models work. Manipulations include include addition, multiplication, noise, rotation, erosion, and dilation, and more. Inspired by [network-bending](https://github.com/terrybroad/network-bending) of GAN models. 
+A ComfyUI custom node that provides **model bending** for diffusion models (e.g. Stable Diffusion, Flux). Model bending is the manipulation of a model's activations at different chosen parts during sampling. It's a low level kind of control, and it is useful for creating experimential variations on an output, or for testing out, breaking, or tinkering with models. Manipulations include include addition, multiplication, noise, rotation, erosion, and dilation, and more. Inspired by [network-bending](https://github.com/terrybroad/network-bending) of GAN models. 
+
+## Showcase
+A demo with pre-computed bending results and explainations can be accessed here: [https://diffusion-bending-demo.netlify.app/](https://diffusion-bending-demo.netlify.app/)
 
 An example of rotating the outputs of the realisticvisionv51_v51vae model at its Unet's middle block (middle_block.2.out_layers), doing a full rotation (0-360deg).
 
@@ -10,8 +13,10 @@ Another loop where we inject a scalar value (-10 to 30) to the middle block (mid
 
 ![image](docs/imgs/bending_add_analog_portrait.gif)
 
-This project provides:
+You can also refer to [this document](https://drive.google.com/file/d/1i2DblNXDNYoJou9sKNzwu58-b2s6wASu/view?usp=sharing) which shows a catalog of generated results, sampled  by systmatically bending different layers in one model. The images are sorted top-bottom by the appearance of the neural network layer within the model. Then sorted left to right by the scalar magnitude of how much the activations produced by that layer are multiplied with: 0 (ablation), 0.5, 1 (default, output when no bending is applied), 1.5 and 2.
 
+## Components
+This project provides:
 1. <mark>NEW</mark> **Interactive Bending Web UI** — Plug-and-play. Simply connect the model to the node then send the model downstream. Visualize the model structure (U-Net / transformer), pick layers, and apply bends from the browser. Copy bends as JSON and paste into the **Apply Bends from JSON** node. [[Workflow](workflows/interactive_bending.json)]
 
 ![image](docs/imgs/interactive_bending.gif)
@@ -27,39 +32,20 @@ This project provides:
 
 
 ## Quickstart
-
 1. Install [ComfyUI](https://docs.comfy.org/get_started).
-2. (Optional) Install [ComfyUI-Manager](https://github.com/ltdrdata/ComfyUI-Manager) and install this extension from the manager; or clone manually (see below).
-3. Restart ComfyUI.
-4. Web UI: open `{ComfyUI_URL}/web_bend_demo/`. All bending nodes are under **model_bending** / **model_bending_demo** in the node menu.
+2. (For older versions of Comfy, since the Manager is packaged with Comfy now) Install [ComfyUI-Manager](https://github.com/ltdrdata/ComfyUI-Manager) and install this extension from the manager; or clone manually (see below).
+3. Restart ComfyUI and refresh your broweser.
 
 ## Installation (manual)
-
 1. Clone into ComfyUI custom nodes:
    ```bash
    cd ComfyUI/custom_nodes
    git clone <repository-url> ComfyUI-Web-Bend-Demo
    ```
    Replace `<repository-url>` with the actual repo URL (e.g. your fork or upstream).
-2. Restart ComfyUI. The web UI is served at `{ComfyUI_URL}/web_bend_demo/`.
-
-## Contents
-
-| Path | Description |
-|------|-------------|
-| **web/** | Web UI (explorer, config, assets). See [web/README.md](web/README.md) for setup and ViewComfy/local Comfy options. |
-| **scripts/** | Experiment runners, export, metrics, and explorer. See [scripts/README.md](scripts/README.md). |
-| **nodes.py** | ComfyUI nodes (e.g. `InteractiveBendingWebUI`, `ApplyBendsFromJSON`). |
-| **model_bending_nodes.py** | Standalone bending nodes (inspector, VAE bending, latent/conditioning ops). |
-| **bendutils.py** | Bending and graph utilities. |
-
-## Configuration
-
-- **Local ComfyUI**: Default `config.js` points to `http://127.0.0.1:8188`; ensure ComfyUI is running with `--listen`.
-- **Remote ViewComfy**: To use remote inference, set `VIEWCOMFY_API_URL`, `VIEWCOMFY_CLIENT_ID`, and `VIEWCOMFY_CLIENT_SECRET` in `web/js/config.js`. The repository ships with empty values; **do not commit real credentials**.
-
+2. Restart ComfyUI. The web UI is served at `{ComfyUI_URL}/web_bend_demo/`
+   
 ## Available nodes
-
 | Node name | Category / use |
 |-----------|----------------|
 | Interactive Bending WebUI | Web UI — connect MODEL, configure bends in browser |
@@ -78,13 +64,19 @@ This project provides:
 | Latent Operation (Multiply Scalar, Add Scalar, Threshold, Rotate, Add Noise, Custom) | LATENT / CONDITIONING ops |
 | ConditioningApplyOperation | CONDITIONING ops |
 
+## Folder Contents
+| Path | Description |
+|------|-------------|
+| **web/** | Web UI (explorer, config, assets). See [web/README.md](web/README.md) for setup and ViewComfy/local Comfy options. |
+| **scripts/** | Experiment runners, export, metrics, and explorer. See [scripts/README.md](scripts/README.md). |
+| **nodes.py** | ComfyUI nodes (e.g. `InteractiveBendingWebUI`, `ApplyBendsFromJSON`). |
+| **model_bending_nodes.py** | Standalone bending nodes (inspector, VAE bending, latent/conditioning ops). |
+| **bendutils.py** | Bending and graph utilities. |
+
 ## Notes
-
 This is an ongoing project. Issues and feature requests are welcome (e.g. via GitHub issues as applicable).
-
 ## Supported Models
 In theory, most of the nodes should work with any model because bending only needs an address/path in the model and that can vary from one model to another. However the Interactive Bending node is currently supported and tested out for Stable Diffusion and Flux variants. 
 
 ## License
-
 See [web/LICENSE](web/LICENSE) for license information.
