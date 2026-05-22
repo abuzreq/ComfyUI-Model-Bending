@@ -15,7 +15,7 @@ import hashlib
 import math
 import os
 
-from .bendutils import operations, parse_step_str_to_ranges, ensure_clone_has_own_inner
+from .bendutils import operations, parse_step_str_to_ranges, make_bending_unet_wrapper
 from .bending_modules import (
     BendingModule,
     AddNoiseModule,
@@ -338,50 +338,32 @@ def apply_bends_to_model(model, bends: List[Dict[str, Any]], steps_min: Optional
     """
     Apply a list of bends to a model and return the patched model.
     bends: list of { "path", "module_type", "module_args" } (paths relative to the bent part).
-    Step-based bending: we set current_step on bending modules only when the sampler provides sigmas (runtime check); works for any model type.
+    Hooks are registered per-forward and removed in a finally block, so no hooks persist on the
+    shared underlying module between steps or across parallel ComfyUI branches.
     """
     if not bends:
         return (model,)
     if not (hasattr(model, "clone") and callable(getattr(model, "clone", None))):
         raise RuntimeError("Model has no clone() method; cannot patch for bending.")
     m = model.clone()
-    ensure_clone_has_own_inner(model, m)
     target_module = get_unet_from_comfy_model(m)
     if target_module is None:
         return (model,)
-    clear_forward_hooks(target_module)
     if steps_min is not None and steps_max is not None:
         steps_to_bend_str = f"{steps_min}-{steps_max}"
     else:
         steps_to_bend_str = "*"
     steps_to_bend = parse_step_str_to_ranges(steps_to_bend_str, max_steps=max_denoising_steps)
-    bending_modules: List[nn.Module] = []
+    # Build a chain of per-forward wrappers, one per bend.
+    # The outermost wrapper (set on the model) is the last one built; it calls the next
+    # wrapper in the chain, which ultimately calls apply_model.
+    wrapper = m.model_options.get("model_function_wrapper")
     for b in bends:
         mod = build_bending_module(b["module_type"], b["module_args"])
         mod.steps_to_bend = steps_to_bend
-        bending_modules.append(mod)
-        hook_module(target_module, b["path"], mod)
-    def _step_aware_wrapper(apply_model, params):
-        inp = params["input"]
-        timestep = params["timestep"]
-        c = params["c"]
-        transformer_options = (c or {}).get("transformer_options") or {}
-        sigmas = transformer_options.get("sample_sigmas")
-        all_sigmas = transformer_options.get("sigmas")
-        if sigmas is not None and all_sigmas is not None:
-            try:
-                sigmas = sigmas.to(device="cpu")
-                all_sigmas = all_sigmas.cpu()
-                idx = (sigmas == all_sigmas).nonzero(as_tuple=True)[0]
-                if idx.numel() > 0:
-                    current_step = idx[0].item()
-                    for mod in bending_modules:
-                        mod.current_step = current_step
-            except Exception:
-                pass
-        return apply_model(inp, timestep, **c)
-    if hasattr(m, "set_model_unet_function_wrapper") and bending_modules:
-        m.set_model_unet_function_wrapper(_step_aware_wrapper)
+        wrapper = make_bending_unet_wrapper(target_module, [b["path"]], mod, wrapper)
+    if wrapper is not None:
+        m.set_model_unet_function_wrapper(wrapper)
     return (m,)
 
 

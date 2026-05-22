@@ -20,6 +20,7 @@ from .bendutils import (
     process_path,
     parse_step_str_to_ranges,
     ensure_clone_has_own_inner,
+    make_bending_unet_wrapper,
 )
 from .bending_modules import (
     AddNoiseModule,
@@ -278,15 +279,12 @@ class LoRABending:
                 loaded[k] = (tag, (bending_module(tail[0].clone().detach()),) + tuple(tail[1:]))
         if model is not None:
             new_modelpatcher = model.clone()
-            ensure_clone_has_own_inner(model, new_modelpatcher)
-            if _get_unet_from_comfy_model(new_modelpatcher) is None:
-                new_modelpatcher = copy.deepcopy(model)
             k = new_modelpatcher.add_patches(loaded, strength_model=1)
         else:
             k = ()
             new_modelpatcher = None
         if clip is not None:
-            new_clip = copy.deepcopy(clip)
+            new_clip = clip.clone()
             k1 = new_clip.add_patches(loaded, 1)
         else:
             k1 = ()
@@ -408,15 +406,12 @@ class LoRABendingList:
             )
         if model is not None:
             new_modelpatcher = model.clone()
-            ensure_clone_has_own_inner(model, new_modelpatcher)
-            if _get_unet_from_comfy_model(new_modelpatcher) is None:
-                new_modelpatcher = copy.deepcopy(model)
             k = new_modelpatcher.add_patches(loaded, strength_model=1)
         else:
             k = ()
             new_modelpatcher = None
         if clip is not None:
-            new_clip = copy.deepcopy(clip)
+            new_clip = clip.clone()
             k1 = new_clip.add_patches(loaded, 1)
         else:
             k1 = ()
@@ -546,26 +541,86 @@ class HBending:
 
     def patch(self, model, pcs, direction, scale):
         m = model.clone()
-        ensure_clone_has_own_inner(model, m)
-        if _get_unet_from_comfy_model(m) is None:
-            m = copy.deepcopy(model)
+        unet = _get_unet_from_comfy_model(m)
+        if unet is None:
+            return (model,)
 
-        def hook_project(module, inp, output):
-            change = pcs["samples"][direction, module.step, :, :, :] * scale
-            module.step += 1
-            return output + change.unsqueeze(0)
+        # Target module on the shared underlying UNet (same object seen by all clones).
+        mod = getattr(unet.middle_block, "1")
 
-        mod = getattr(m.model.diffusion_model.middle_block, "1")
-        mod.step = 0
-        if getattr(mod, "hspace_hook", None) is not None:
-            mod.hspace_hook.remove()
-        setattr(mod, "hspace_hook", mod.register_forward_hook(hook_project))
+        # Step counter lives in a closure so it never mutates the shared module.
+        step_counter = [0]
+
+        prev_wrapper = m.model_options.get("model_function_wrapper")
+
+        def hbending_wrapper(apply_model, params):
+            inp = params["input"]
+            timestep = params["timestep"]
+            c = params["c"]
+            current_step = step_counter[0]
+
+            def hook_project(module, hook_inp, output):
+                change = pcs["samples"][direction, current_step, :, :, :] * scale
+                step_counter[0] += 1
+                return output + change.unsqueeze(0)
+
+            handle = mod.register_forward_hook(hook_project)
+            try:
+                if prev_wrapper is not None:
+                    return prev_wrapper(apply_model, params)
+                return apply_model(inp, timestep, **c)
+            finally:
+                handle.remove()
+
+        m.set_model_unet_function_wrapper(hbending_wrapper)
         return (m,)
 
 
 # ---------------------------------------------------------------------------
 # SD Model Bending / Custom Model Bending
 # ---------------------------------------------------------------------------
+
+class SDBlockModelBending:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "model": ("MODEL",),
+                "bending_module": ("BENDING_MODULE",),
+                "block_type": (["input_blocks", "middle_block", "output_blocks"], {"default": "input_blocks"}),
+                "block_index": ("INT", {"default": 0, "min": 0, "max": 20, "step": 1}),
+            }
+        }
+
+    RETURN_TYPES = ("MODEL",)
+    FUNCTION = "patch"
+    CATEGORY = "model_bending"
+
+    def patch(self, model, bending_module, block_type, block_index):
+        if not (hasattr(model, "clone") and callable(getattr(model, "clone", None))):
+            raise RuntimeError("Model has no clone() method; cannot patch for bending.")
+
+        m = model.clone()
+        unet = _get_unet_from_comfy_model(m)
+        if unet is None:
+            return (model,)
+
+        target_container = getattr(unet, block_type)
+        if block_type != "middle_block":
+            if block_index >= len(target_container):
+                block_index = len(target_container) - 1
+            path_suffix = f"{block_type}.{block_index}"
+        else:
+            path_suffix = "middle_block"
+
+        full_path = process_path(f"diffusion_model.{path_suffix}")
+
+        prev_wrapper = m.model_options.get("model_function_wrapper")
+        m.set_model_unet_function_wrapper(
+            make_bending_unet_wrapper(unet, [full_path], bending_module, prev_wrapper)
+        )
+        return (m,)
+    
 class SDModelBending:
     @classmethod
     def INPUT_TYPES(s):
@@ -593,7 +648,6 @@ class SDModelBending:
         if not (hasattr(model, "clone") and callable(getattr(model, "clone", None))):
             raise RuntimeError("Model has no clone() method; cannot patch for bending.")
         m = model.clone()
-        ensure_clone_has_own_inner(model, m)
         unet = _get_unet_from_comfy_model(m)
         if unet is None:
             return (model,)
@@ -603,7 +657,12 @@ class SDModelBending:
             layer_num = max(0, len(convs) - 1)
         path_to_module, _ = convs[layer_num]
         mod_path = "" if not path_to_module else process_path("diffusion_model." + block + "." + path_to_module)
-        hook_module(m.model.diffusion_model, mod_path, bending_module)
+        if not mod_path:
+            return (model,)
+        prev_wrapper = m.model_options.get("model_function_wrapper")
+        m.set_model_unet_function_wrapper(
+            make_bending_unet_wrapper(unet, [mod_path], bending_module, prev_wrapper)
+        )
         return (m,)
 
 
@@ -626,36 +685,23 @@ class CustomModelBending:
     CATEGORY = "model_bending"
 
     def patch(self, model, bending_module, path, steps_to_bend_str="*", max_denoising_steps=200):
-        m = model.clone()
-        ensure_clone_has_own_inner(model, m)
-        if _get_unet_from_comfy_model(m) is None:
-            m = copy.deepcopy(model)
         if not path or path == "False" or not isinstance(path, str):
             return (model,)
-        split_paths = [p.strip() for p in path.split(",") if p.strip()]
-        module = m.model.diffusion_model if hasattr(m, "model") else (m.stream.unet if hasattr(m, "stream") else None)
-        if module is None:
+
+        m = model.clone()
+        unet = _get_unet_from_comfy_model(m)
+        if unet is None:
             return (model,)
 
-        def my_unet_wrapper(apply_model, params):
-            inp, timestep, c = params["input"], params["timestep"], params["c"]
-            transformer_options = params["c"].get("transformer_options", {})
-            sigmas = transformer_options.get("sample_sigmas")
-            if sigmas is not None:
-                sigmas = sigmas.to(device="cpu")
-                all_sigmas = transformer_options.get("sigmas")
-                if all_sigmas is not None:
-                    current_step = (sigmas == all_sigmas.cpu()).nonzero(as_tuple=True)[0]
-                    if current_step.numel() > 0:
-                        bending_module.current_step = current_step[0].item()
-            return apply_model(inp, timestep, **c)
+        split_paths = [p.strip() for p in path.split(",") if p.strip()]
+        mod_paths = [process_path(p) for p in split_paths if p]
+        mod_paths = [mp for mp in mod_paths if mp]
 
-        m.set_model_unet_function_wrapper(my_unet_wrapper)
         bending_module.steps_to_bend = parse_step_str_to_ranges(steps_to_bend_str, max_steps=max_denoising_steps)
-        for p in split_paths:
-            mod_path = "" if not p else process_path(p)
-            if mod_path:
-                hook_module(module, mod_path, bending_module)
+
+        prev_wrapper = m.model_options.get("model_function_wrapper")
+        wrapper = make_bending_unet_wrapper(unet, mod_paths, bending_module, prev_wrapper)
+        m.set_model_unet_function_wrapper(wrapper)
         return (m,)
 
 
@@ -993,6 +1039,7 @@ NODE_CLASS_MAPPINGS = {
     "Latent Operation To Module": LatentOperationToModule,
     "Model Bending": CustomModelBending,
     "Model Bending (SD Layers)": SDModelBending,
+    "Model Bending (SD Blocks)": SDBlockModelBending,
     "Model VAE Bending": CustomModuleVAEBending,
     "Model Inspector": ShowModelStructure,
     "Model VAE Inspector": ShowVAEModelStructure,

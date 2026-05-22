@@ -1,6 +1,7 @@
 # modified from https://github.com/dzluke/DAFX2024/blob/main/util.py
 
 import copy
+import logging
 import numpy as np
 import math
 import argparse
@@ -171,7 +172,7 @@ def inject_module(model: nn.Module, layer_path: str, new_module: nn.Module):
 def process_path(path, extra_skips=[]):
     subclasses = ['BaseModel'] + \
         [c.__name__.split('.')[-1] for c in BaseModel.__subclasses__()]
-    skips = ["diffusion_model", "UNet2DConditionModel"]
+    skips = ["diffusion_model", "UNet2DConditionModel", "Flux", "Flux2", ]
     skips += extra_skips
     # clean up loose dots at start or end
     start = 1 if path[0] == '.' else 0
@@ -1051,6 +1052,85 @@ def scale(r1, r2):
         return x
     return fn
 
+
+
+def resolve_module(root: nn.Module, layer_path: str):
+    """Navigate dot-separated path on an nn.Module (numeric parts index into containers)."""
+    cur = root
+    for part in layer_path.split("."):
+        if part.isdigit():
+            cur = cur[int(part)]
+        else:
+            cur = getattr(cur, part)
+    return cur
+
+
+def make_bending_unet_wrapper(unet: nn.Module, mod_paths, bending_module: nn.Module, prev_wrapper=None):
+    """
+    Return a model_function_wrapper that:
+    1. Sets bending_module.current_step from transformer_options (step tracking).
+    2. Registers a forward hook on each target module right before calling apply_model.
+    3. Calls prev_wrapper (or apply_model directly) so multiple bending nodes chain.
+    4. Removes every hook in a finally block so no hooks persist between steps or
+       across parallel ComfyUI branches.
+
+    mod_paths: list of resolved dot-separated paths (relative to unet).
+    prev_wrapper: the prior model_function_wrapper from model_options, or None.
+    """
+    # Resolve target modules up front; skip any that are nn.ModuleList.
+    targets = []
+    for p in mod_paths:
+        if not p:
+            continue
+        try:
+            mod = resolve_module(unet, p)
+        except (AttributeError, KeyError, IndexError, TypeError) as exc:
+            logging.warning("make_bending_unet_wrapper: could not resolve path %r: %s", p, exc)
+            continue
+        if isinstance(mod, nn.ModuleList):
+            logging.warning(
+                "make_bending_unet_wrapper: path %r resolves to nn.ModuleList which cannot be "
+                "hooked directly; skipping. Hook a specific child instead.", p
+            )
+            continue
+        targets.append(mod)
+
+    def wrapper(apply_model, params):
+        inp = params["input"]
+        timestep = params["timestep"]
+        c = params["c"]
+
+        # Step tracking: update bending_module.current_step if sigmas are available.
+        transformer_options = (c or {}).get("transformer_options", {})
+        sigmas = transformer_options.get("sample_sigmas")
+        if sigmas is not None:
+            try:
+                sigmas_cpu = sigmas.to(device="cpu")
+                all_sigmas = transformer_options.get("sigmas")
+                if all_sigmas is not None:
+                    all_sigmas_cpu = all_sigmas.to(device="cpu")
+                    idx = (sigmas_cpu == all_sigmas_cpu).nonzero(as_tuple=True)[0]
+                    if idx.numel() > 0:
+                        bending_module.current_step = idx[0].item()
+            except Exception:
+                pass
+
+        # Register a forward hook on each target for the duration of this forward pass.
+        handles = []
+        for target in targets:
+            def _hook(module, args, kwargs, output, _bm=bending_module):
+                return _bm(output, *args, **kwargs)
+            handles.append(target.register_forward_hook(_hook, with_kwargs=True))
+
+        try:
+            if prev_wrapper is not None:
+                return prev_wrapper(apply_model, params)
+            return apply_model(inp, timestep, **c)
+        finally:
+            for h in handles:
+                h.remove()
+
+    return wrapper
 
 
 def parse_step_str_to_ranges(s, max_steps=1000):
