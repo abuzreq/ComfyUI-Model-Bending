@@ -24,6 +24,7 @@ from .bendutils import (
 from .bending_modules import (
     AddNoiseModule,
     AddScalarModule,
+    FourierAmplifyModule,
     MultiplyScalarModule,
     ThresholdModule,
     RotateModule,
@@ -726,6 +727,16 @@ class ThresholdModelBending(BaseModelBending):
         return (ThresholdModule(threshold=threshold),)
 
 
+#WIP: Attempting to implmenet "Enhancing Creative Generation on Stable Diffusion-based Models"
+class FourierModelBending(BaseModelBending):
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {"cutoff_freq": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 10.0, "step": 0.25}), "amp_factor": ("FLOAT", {"default": 2.0, "min": -10.0, "max": 10.0, "step": 0.25})}}
+
+    def patch(self, cutoff_freq, amp_factor):
+        return (FourierAmplifyModule(cutoff_freq=cutoff_freq, amp_factor=amp_factor),)
+
+
 class RotateModelBending(BaseModelBending):
     @classmethod
     def INPUT_TYPES(s):
@@ -990,6 +1001,7 @@ NODE_CLASS_MAPPINGS = {
     "Add Scalar Module (Bending)": AddScalarModelBending,
     "Multiply Scalar Module (Bending)": MultiplyScalarModelBending,
     "Threshold Module (Bending)": ThresholdModelBending,
+    "Fourier Amplify Module (Bending)": FourierModelBending,
     "Rotate Module (Bending)": RotateModelBending,
     "Scale Module (Bending)": ScaleModelBending,
     "Erosion Module (Bending)": ErosionModelBending,

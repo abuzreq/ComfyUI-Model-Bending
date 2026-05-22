@@ -85,6 +85,55 @@ class BendingModule(nn.Module):
         raise NotImplementedError("Subclasses must implement the bend() method.")
 
 
+
+class FourierAmplifyModule(BendingModule):
+    """
+    Amplifies specific frequency components of a tensor using FFT.
+    Inherits shape alignment from BendingModule.
+    """
+    def __init__(self, cutoff_freq=5, amp_factor=2.0, steps_to_bend=None):
+        super().__init__()
+        self.cutoff_freq = cutoff_freq
+        self.amp_factor = amp_factor
+        self.steps_to_bend = steps_to_bend
+        self.current_step = None
+
+    def bend(self, x, *args, **kwargs):
+        # 1. FFT to Frequency Domain
+        # We use .float() because FFT typically requires float32/64
+        sample_fft = torch.fft.fftn(x.float())
+        sample_fft_shifted = torch.fft.fftshift(sample_fft)
+
+        # 2. Create the Low-Pass Mask
+        b, c, h, w = x.shape
+        
+        # Create coordinate grids
+        # Note: We use x.device to ensure mask is on the same device as input
+        y_grid = torch.arange(-h // 2, h // 2, device=x.device).view(h, 1)
+        x_grid = torch.arange(-w // 2, w // 2, device=x.device).view(1, w)
+        
+        # Calculate Euclidean distance from center (radius)
+        radius = torch.sqrt(x_grid**2 + y_grid**2)
+
+        # Create mask: 1 for low frequencies (inside circle), 0 for high (outside)
+        mask = (radius < self.cutoff_freq).float()
+        
+        # Reshape mask for broadcasting: [1, 1, h, w]
+        mask = mask.unsqueeze(0).unsqueeze(0)
+
+        # 3. Targeted Amplification
+        # (1-mask) preserves high frequencies (noise/details) at 1.0x
+        # (mask * amp_factor) scales low frequencies (structure)
+        sample_fft_filtered = (sample_fft_shifted * (1 - mask)) + \
+                               (sample_fft_shifted * mask * self.amp_factor)
+
+        # 4. Inverse FFT to Spatial Domain
+        sample_fft_ishifted = torch.fft.ifftshift(sample_fft_filtered)
+        denoised_sample = torch.fft.ifftn(sample_fft_ishifted).real
+
+        # Return to original dtype (e.g., float16 if working with SDXL/Latents)
+        return denoised_sample.to(x.dtype)
+    
 class AddNoiseModule(BendingModule):
     def __init__(self, noise_std=1, seed=42):
         super().__init__()
