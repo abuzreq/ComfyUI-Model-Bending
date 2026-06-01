@@ -14,12 +14,10 @@ from server import PromptServer
 
 from .bendutils import (
     operations,
-    inject_module,
-    hook_module,
     get_model_tree,
     process_path,
     parse_step_str_to_ranges,
-    ensure_clone_has_own_inner,
+    resolve_module,
     make_bending_unet_wrapper,
 )
 from .bending_modules import (
@@ -150,30 +148,45 @@ class IntermediateOutputNode:
 
     def process(self, model, layer_path, timestep, noise_seed, latent_image, cfg, positive, negative, sampler, sigmas):
         m = model.clone()
-        ensure_clone_has_own_inner(model, m)
-        if _get_unet_from_comfy_model(m) is None:
-            m = copy.deepcopy(model)
-        device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-        m.model = m.model.to(device=device)
+        unet = _get_unet_from_comfy_model(m)
+        if unet is None:
+            logging.warning("IntermediateOutputNode: could not find UNet on model; returning zeros.")
+            batch_size = latent_image["samples"].shape[0]
+            return (torch.zeros(batch_size, 1, 1, 1), torch.zeros(batch_size, 64, 64, 4))
+
         mod_path = "" if layer_path is None or layer_path == "" else process_path(layer_path)
         intermediate = {"output": []}
-        if mod_path != "":
-            def hook(module, inputs, output):
-                intermediate["output"] = [output]
-            parts = mod_path.split(".")
-            target_module = m.model.diffusion_model
-            for part in parts:
-                target_module = target_module[int(part)] if part.isdigit() else getattr(target_module, part)
-            handle = target_module.register_forward_hook(hook)
+
+        if mod_path:
+            try:
+                target_module = resolve_module(unet, mod_path)
+            except Exception as exc:
+                logging.warning("IntermediateOutputNode: could not resolve path %r: %s", mod_path, exc)
+                target_module = None
+
+            if target_module is not None:
+                def capture_wrapper(apply_model, params):
+                    inp, timestep_, c = params["input"], params["timestep"], params["c"]
+
+                    def _hook(module, args, kwargs, output):
+                        intermediate["output"] = [output]
+
+                    handle = target_module.register_forward_hook(_hook, with_kwargs=True)
+                    try:
+                        return apply_model(inp, timestep_, **c)
+                    finally:
+                        handle.remove()
+
+                m.set_model_unet_function_wrapper(capture_wrapper)
+
         batch_size = latent_image["samples"].shape[0]
         with torch.no_grad():
             final_output = self.sample(m, True, noise_seed, cfg, positive, negative, sampler, sigmas, latent_image)
             final_output = final_output[0]["samples"]
-        if mod_path != "":
-            handle.remove()
-        combined_features = torch.zeros((batch_size, 64, 64, 4), device=device)
+
+        combined_features = torch.zeros((batch_size, 64, 64, 4))
         intermediate_outputs = intermediate.get("output")
-        if intermediate_outputs is not None:
+        if intermediate_outputs:
             feature_maps = []
             for one_step_output in intermediate_outputs:
                 for j in range(one_step_output.shape[0]):
@@ -1000,10 +1013,22 @@ class CustomModuleVAEBending:
     CATEGORY = "model_bending"
 
     def patch(self, vae, path, bending_module):
-        m = copy.deepcopy(vae)
         mod_path = "" if not path else process_path(path, ["AutoencoderKL", "TAESD"])
-        if mod_path:
-            hook_module(m.patcher.model, mod_path, bending_module)
+        if not mod_path:
+            return (vae,)
+
+        # Shallow-copy the VAE Python wrapper so the caller gets a distinct object
+        # without duplicating any weight tensors.
+        m = copy.copy(vae)
+        # Give it a cloned patcher so object_patches are isolated to this copy.
+        m.patcher = vae.patcher.clone()
+
+        # Build a thin wrapper: run the original submodule then apply bending_module.
+        original_submod = comfy.utils.get_attr(m.patcher.model, mod_path)
+        bent_submod = nn.Sequential(original_submod, bending_module)
+        # add_object_patch installs bent_submod during patch_model() and restores
+        # the original in unpatch_model() — no weight duplication.
+        m.patcher.add_object_patch(mod_path, bent_submod)
         return (m,)
 
 
