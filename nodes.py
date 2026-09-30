@@ -10,15 +10,22 @@ import torch.nn as nn
 from aiohttp import web
 from server import PromptServer
 
+import difflib
+import fnmatch
 import json
 import hashlib
 import math
 import os
+import re
 
-from .bendutils import operations, parse_step_str_to_ranges, make_bending_unet_wrapper
+from .bendutils import (
+    operations, parse_step_str_to_ranges, make_bends_wrapper, BendSpec, warn, LOG_TAG, GUARD_NAN_MODES,
+    expand_path_pattern, resolve_hook_target,
+)
 from .bending_modules import (
     BendingModule,
     AddNoiseModule,
+    FourierAmplifyModule,
     AddScalarModule,
     MultiplyScalarModule,
     ThresholdModule,
@@ -41,7 +48,7 @@ try:
     import kornia.geometry.transform as KT
 except ImportError:
     KT = None
-    print("Warning: kornia not available, rotation bending will not work")
+    print("[model-bending] kornia not available, rotation bending will not work")
 # ----------------------------
 # 1) In-memory per-session state
 # ----------------------------
@@ -61,6 +68,37 @@ SELECTION_BY_SESSION: Dict[str, BendSelection] = {}
 
 # Bending module classes are in bending_modules.py (shared with model_bending_nodes).
 
+# ----------------------------
+# Bend ops for the JSON format
+# ----------------------------
+# Version 1.1 only adds optional keys to v1, so older plugin versions still apply the bends (less precisely)
+# instead of skipping them, and v1 JSON keeps working unchanged.
+BENDS_JSON_VERSION = 1.1
+_TOP_KEYS = {"bends", "bend", "steps_min", "steps_max", "max_denoising_steps", "selected_part", "version"}
+_BEND_KEYS = {"path", "module_type", "module_args", "angle", "steps", "t", "blend", "label", "guard", "inner"}
+
+# name -> (factory, {arg: (type, default, hard limits)}). Hard limits mirror the matching module nodes'
+# widget ranges and are what clamp="hard" enforces; for str args they are the allowed choices.
+BEND_OPS: Dict[str, tuple] = {
+    "add_scalar": (AddScalarModule, {"scalar": (float, 0.0, (-100.0, 100.0))}),
+    "add_noise": (AddNoiseModule, {"noise_std": (float, 0.0, (-100.0, 100.0)), "seed": (int, 42, None)}),
+    "multiply": (MultiplyScalarModule, {"scalar": (float, 1.0, (-100.0, 100.0))}),
+    "rotate": (RotateModule, {"angle_degrees": (float, 0.0, (-360.0, 360.0))}),
+    "threshold": (ThresholdModule, {"threshold": (float, 0.0, None)}),
+    "scale": (ScaleModule, {"scale_factor": (float, 1.0, (-100.0, 100.0))}),
+    "erosion": (ErosionModule, {"kernel_size": (int, 3, (1, 10))}),
+    "dilation": (DilationModule, {"kernel_size": (int, 3, (1, 10))}),
+    "gradient": (GradientModule, {"kernel_size": (int, 3, (1, 10))}),
+    "sobel": (SobelModule, {"normalized": (bool, True, None)}),
+    "fourier": (FourierAmplifyModule, {"cutoff_freq": (float, 5.0, (0.0, 10.0)),
+                                       "amp_factor": (float, 2.0, (-10.0, 10.0))}),
+    # Applies the "inner" op to a random subset of the batch, channels or pixels.
+    "subset": (ApplyToRandomSubsetModule, {"percentage": (float, 0.5, (0.0, 1.0)),
+                                           "dim": (str, "batch", ("batch", "channel", "spatial")),
+                                           "seed": (int, 0, None)}),
+}
+
+
 def _normalize_module_args(module_args: dict) -> Dict[str, Any]:
     """Normalize args for stable JSON hashing: round floats, use int when equal."""
     out = {}
@@ -73,39 +111,113 @@ def _normalize_module_args(module_args: dict) -> Dict[str, Any]:
     return out
 
 
-def build_bending_module(module_type: str, module_args: dict) -> nn.Module:
-    if module_type == "add_scalar":
-        scalar = float(module_args.get("scalar", 0.0))
-        return AddScalarModule(scalar=scalar)
-    elif module_type == "add_noise":
-        noise_std = float(module_args.get("noise_std", 0.0))
-        seed = int(module_args.get("seed", 42))
-        return AddNoiseModule(noise_std=noise_std, seed=seed)
-    elif module_type == "multiply":
-        scalar = float(module_args.get("scalar", 1.0))
-        return MultiplyScalarModule(scalar=scalar)
-    elif module_type == "rotate":
-        angle_degrees = float(module_args.get("angle_degrees", 0.0))
-        return RotateModule(angle_degrees=angle_degrees)
-    elif module_type == "threshold":
-        threshold = float(module_args.get("threshold", 0.0))
-        return ThresholdModule(threshold=threshold)
-    elif module_type == "scale":
-        scale_factor = float(module_args.get("scale_factor", 1.0))
-        return ScaleModule(scale_factor=scale_factor)
-    elif module_type == "erosion":
-        kernel_size = int(module_args.get("kernel_size", 3))
-        return ErosionModule(kernel_size=kernel_size)
-    elif module_type == "dilation":
-        kernel_size = int(module_args.get("kernel_size", 3))
-        return DilationModule(kernel_size=kernel_size)
-    elif module_type == "gradient":
-        kernel_size = int(module_args.get("kernel_size", 3))
-        return GradientModule(kernel_size=kernel_size)
-    elif module_type == "sobel":
-        normalized = bool(module_args.get("normalized", True))
-        return SobelModule(normalized=normalized)
-    raise ValueError(f"Unknown module_type: {module_type}")
+def _coerce(typ, value):
+    if typ is bool:
+        if isinstance(value, str):
+            if value.strip().lower() in ("true", "1", "yes"):
+                return True
+            if value.strip().lower() in ("false", "0", "no"):
+                return False
+            raise ValueError(value)
+        return bool(value)
+    if typ is int:
+        return int(float(value))
+    if typ is float:
+        return float(value)
+    return str(value)
+
+
+def _resolve_op(node: Dict[str, Any], where: str, problems: List[str]) -> Dict[str, Any]:
+    """{module_type, module_args[, inner]} with every argument present, typed and validated."""
+    module_type = node.get("module_type")
+    if module_type not in BEND_OPS:
+        raise ValueError(f"{where}unknown module_type {module_type!r}; known: {', '.join(BEND_OPS)}")
+    spec = BEND_OPS[module_type][1]
+    given = node.get("module_args") or {}
+    if not isinstance(given, dict):
+        problems.append(f"{where}module_args must be an object; using defaults")
+        given = {}
+    args = {}
+    for name, (typ, default, limits) in spec.items():
+        value = default
+        if name in given:
+            try:
+                value = _coerce(typ, given[name])
+            except (TypeError, ValueError):
+                problems.append(f"{where}{module_type}.{name}={given[name]!r} is not a {typ.__name__}; "
+                                f"using {default!r}")
+            if typ is str and limits and value not in limits:
+                problems.append(f"{where}{module_type}.{name}={value!r} must be one of {', '.join(limits)}; "
+                                f"using {default!r}")
+                value = default
+        args[name] = value
+    for name in given:
+        if name not in spec:
+            hint = difflib.get_close_matches(name, list(spec), n=1)
+            problems.append(f"{where}unknown argument {name!r} for {module_type} (ignored); "
+                            + (f"did you mean {hint[0]!r}?" if hint else f"accepted: {', '.join(spec)}"))
+    op = {"module_type": module_type, "module_args": args}
+    if module_type == "subset":
+        inner = node.get("inner")
+        if not isinstance(inner, dict) or not inner.get("module_type"):
+            raise ValueError(f"{where}subset needs an 'inner' bend with a module_type")
+        op["inner"] = _resolve_op({"module_type": inner["module_type"],
+                                   "module_args": _normalize_module_args(inner.get("module_args") or {}),
+                                   "inner": inner.get("inner")}, where + "inner ", problems)
+    elif node.get("inner") is not None:
+        problems.append(f"{where}'inner' is only used by module_type 'subset' (ignored)")
+    return op
+
+
+def _clamp_op(op: Dict[str, Any], path: str, mode: str, safe_ranges: Optional[Dict[str, Any]],
+              report: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Clamp numeric arguments. "hard": each op's absolute limits. "safe": hard limits, then safe_ranges
+    ({op: {arg: [lo, hi]}}, plus optional {"paths": {"<glob>": {op: {arg: [lo, hi]}}}}, most specific glob last).
+    """
+    if mode == "none":
+        return op
+    module_type = op["module_type"]
+    ranges = {name: limits for name, (typ, _, limits) in BEND_OPS[module_type][1].items()
+              if typ in (int, float) and limits}
+    if mode == "safe" and safe_ranges:
+        ranges.update(safe_ranges.get(module_type, {}))
+        for pattern in sorted(safe_ranges.get("paths", {}), key=len):
+            if fnmatch.fnmatchcase(path, pattern):
+                ranges.update(safe_ranges["paths"][pattern].get(module_type, {}))
+    args = dict(op["module_args"])
+    for name, limits in ranges.items():
+        value = args.get(name)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        lo, hi = float(limits[0]), float(limits[1])
+        clamped = type(value)(min(max(value, lo), hi))
+        if clamped != value:
+            args[name] = clamped
+            if report is not None:
+                report.setdefault("clamped", []).append(
+                    {"path": path, "op": module_type, "arg": name, "requested": value, "applied": clamped})
+    out = {**op, "module_args": args}
+    if "inner" in op:
+        out["inner"] = _clamp_op(op["inner"], path, mode, safe_ranges, report)
+    return out
+
+
+def _build_op(op: Dict[str, Any]) -> nn.Module:
+    factory = BEND_OPS[op["module_type"]][0]
+    if op["module_type"] == "subset":
+        a = op["module_args"]
+        return factory(_build_op(op["inner"]), percentage=a["percentage"], seed=a["seed"], dim=a["dim"])
+    return factory(**op["module_args"])
+
+
+def build_bending_module(module_type: str, module_args: dict, inner: Optional[dict] = None) -> nn.Module:
+    problems: List[str] = []
+    module = _build_op(_resolve_op({"module_type": module_type, "module_args": module_args or {}, "inner": inner},
+                                   "", problems))
+    for p in problems:
+        warn(p)
+    return module
 
 
 # ----------------------------
@@ -268,14 +380,21 @@ def clear_forward_hooks(module: nn.Module) -> None:
         clear_forward_hooks(child)
 
 
-def parse_bends_json(json_str: str) -> tuple:
+def parse_bends_json(json_str: str, problems: Optional[List[str]] = None) -> tuple:
     """
     Parse JSON from the web UI "Copy Bends" clipboard format.
     Returns (bends, steps_min, steps_max, max_denoising_steps, selected_part).
-    Supports: { "bends": [...], "steps_min": ?, "steps_max": ?, "max_denoising_steps": ?, "selected_part": ? }
+    Supports: { "bends": [...], "steps_min": ?, "steps_max": ?, "max_denoising_steps": ?, "selected_part": ?,
+                "version": ? }
     Each bend: { "path", "module_type", "module_args" } or legacy { "path", "angle" }.
-    Raises ValueError on parse error or invalid structure.
+    Optional per-bend fields (version 1.1): "steps" (e.g. "0-4,9" or "3-"), "t" ([hi, lo] normalised diffusion
+    time, 1 = pure noise), "blend" (0..1), "label", "guard" ({"nan", "max_std_ratio", "preserve_norm"}),
+    "inner" (the op wrapped by module_type "subset"). "path" may use wildcards ("output_blocks.*.1").
+    Structural problems (unknown keys, bends without a path, ...) are appended to `problems`, or logged when
+    no list is given. Raises ValueError on invalid JSON.
     """
+    own_problems = problems is None
+    problems = [] if problems is None else problems
     if not (json_str or "").strip():
         return [], None, None, 200, None
     try:
@@ -284,25 +403,50 @@ def parse_bends_json(json_str: str) -> tuple:
         raise ValueError(f"Invalid JSON: {e}") from e
     if not isinstance(data, dict):
         raise ValueError("Expected a JSON object with 'bends' array")
+    for key in data:
+        if key not in _TOP_KEYS:
+            problems.append(f"unknown top-level key {key!r} (ignored)")
+    version = data.get("version")
+    if version is not None:
+        try:
+            if float(version) > BENDS_JSON_VERSION:
+                problems.append(f"version {version} is newer than this plugin understands ({BENDS_JSON_VERSION}); "
+                                "fields it does not know are ignored")
+        except (TypeError, ValueError):
+            problems.append(f"version {version!r} is not a number")
     raw = data.get("bends", data.get("bend", []))
     if isinstance(raw, dict):
         raw = list(raw.values()) if raw else []
     if not isinstance(raw, list):
+        problems.append("'bends' must be a list; no bends applied")
         raw = []
     bends: List[Dict[str, Any]] = []
-    for b in raw:
+    for i, b in enumerate(raw):
         if not isinstance(b, dict):
+            problems.append(f"bend #{i} is not an object; skipped")
             continue
         path = b.get("path")
         if not path or not isinstance(path, str):
+            problems.append(f"bend #{i} has no 'path'; skipped")
             continue
+        where = f"bend #{i} ({path}): "
+        for key in b:
+            if key not in _BEND_KEYS:
+                problems.append(f"{where}unknown key {key!r} (ignored)")
         if "angle" in b and isinstance(b.get("angle"), (int, float)):
             module_type = "rotate"
             module_args = _normalize_module_args({"angle_degrees": float(b["angle"])})
         else:
-            module_type = (b.get("module_type") or "").strip() or "rotate"
+            module_type = (b.get("module_type") or "").strip()
+            if not module_type:
+                problems.append(f"{where}no module_type; defaulting to 'rotate'")
+                module_type = "rotate"
             module_args = _normalize_module_args(b.get("module_args") or {})
-        bends.append({"path": path, "module_type": module_type, "module_args": module_args})
+        bend = {"path": path, "module_type": module_type, "module_args": module_args}
+        for key in ("steps", "t", "blend", "label", "guard", "inner"):
+            if b.get(key) is not None:
+                bend[key] = b[key]
+        bends.append(bend)
 
     steps_min = data.get("steps_min")
     steps_max = data.get("steps_max")
@@ -315,6 +459,7 @@ def parse_bends_json(json_str: str) -> tuple:
                 else:
                     steps_max = int(val)
             except (TypeError, ValueError):
+                problems.append(f"{name}={val!r} is not an integer (ignored)")
                 if name == "steps_min":
                     steps_min = None
                 else:
@@ -330,40 +475,151 @@ def parse_bends_json(json_str: str) -> tuple:
         selected_part = str(selected_part).strip() or None
     elif selected_part is not None:
         selected_part = (selected_part or "").strip() or None
+    if own_problems:
+        for p in problems:
+            warn(p)
     return bends, steps_min, steps_max, max_denoising_steps, selected_part
 
 
+def _steps_str(steps_min, steps_max):
+    if steps_min is None and steps_max is None:
+        return "*"
+    return f"{'' if steps_min is None else steps_min}-{'' if steps_max is None else steps_max}"
+
+
+def _parse_t_window(value):
+    if value is None:
+        return None
+    if not (isinstance(value, (list, tuple)) and len(value) == 2):
+        raise ValueError(f"'t' must be [hi, lo], got {value!r}")
+    hi, lo = float(max(value)), float(min(value))
+    return None if (hi >= 1.0 and lo <= 0.0) else (hi, lo)
+
+
+def _check_guard(guard, where: str, problems: List[str]) -> Optional[Dict[str, Any]]:
+    if guard is None:
+        return None
+    if not isinstance(guard, dict):
+        problems.append(f"{where}guard must be an object (ignored)")
+        return None
+    out: Dict[str, Any] = {}
+    for key, value in guard.items():
+        if key == "nan" and value in GUARD_NAN_MODES:
+            out[key] = value
+        elif key == "max_std_ratio" and isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0:
+            out[key] = float(value)
+        elif key == "preserve_norm" and isinstance(value, bool):
+            out[key] = value
+        elif key in ("nan", "max_std_ratio", "preserve_norm"):
+            problems.append(f"{where}invalid guard.{key}={value!r} (ignored); nan: {'|'.join(GUARD_NAN_MODES)}, "
+                            "max_std_ratio: number > 0, preserve_norm: true|false")
+        else:
+            problems.append(f"{where}unknown guard key {key!r} (ignored)")
+    return out or None
+
+
 def apply_bends_to_model(model, bends: List[Dict[str, Any]], steps_min: Optional[int] = None,
-                         steps_max: Optional[int] = None, max_denoising_steps: int = 200):
+                         steps_max: Optional[int] = None, max_denoising_steps: int = 200,
+                         selected_part: Optional[str] = None, strict: bool = False,
+                         report: Optional[Dict[str, Any]] = None, clamp: str = "none",
+                         safe_ranges: Optional[Dict[str, Any]] = None, problems: Optional[List[str]] = None,
+                         resolved: Optional[List[Dict[str, Any]]] = None):
     """
     Apply a list of bends to a model and return the patched model.
-    bends: list of { "path", "module_type", "module_args" } (paths relative to the bent part).
-    Hooks are registered per-forward and removed in a finally block, so no hooks persist on the
-    shared underlying module between steps or across parallel ComfyUI branches.
+    bends: list of { "path", "module_type", "module_args", optional "steps", "t", "blend", "label", "guard",
+    "inner" } (see parse_bends_json). Paths are relative to selected_part (default: diffusion_model), as shown
+    by the web UI, and may contain wildcards.
+    steps_min/steps_max give the default step range; either end may be omitted.
+    clamp: "none" | "hard" | "safe" (see _clamp_op). Problems found are logged and listed in report["warnings"];
+    with strict they raise. `resolved` receives one fully explicit bend per hooked layer.
+    All bends share one per-forward wrapper; hooks are removed in a finally block, so no hooks persist
+    on the shared underlying module between steps or across parallel ComfyUI branches.
+    Bends on the same layer apply last-to-first, as they always have for this format.
     """
+    problems = [] if problems is None else problems
+
+    def finish():
+        """Log problems, list them in the report and enforce strict. Runs on every exit path."""
+        for p in problems:
+            warn(p)
+        if report is not None and problems:
+            report["warnings"] = list(problems)
+        if strict and problems:
+            raise ValueError(f"{LOG_TAG} bends JSON problems (strict):\n- " + "\n- ".join(problems))
+
     if not bends:
+        if not problems:
+            problems.append("no bends to apply")
+        finish()
         return (model,)
     if not (hasattr(model, "clone") and callable(getattr(model, "clone", None))):
         raise RuntimeError("Model has no clone() method; cannot patch for bending.")
     m = model.clone()
     target_module = get_unet_from_comfy_model(m)
     if target_module is None:
+        problems.append("no diffusion model found on this MODEL; nothing bent")
+        finish()
         return (model,)
-    if steps_min is not None and steps_max is not None:
-        steps_to_bend_str = f"{steps_min}-{steps_max}"
-    else:
-        steps_to_bend_str = "*"
-    steps_to_bend = parse_step_str_to_ranges(steps_to_bend_str, max_steps=max_denoising_steps)
-    # Build a chain of per-forward wrappers, one per bend.
-    # The outermost wrapper (set on the model) is the last one built; it calls the next
-    # wrapper in the chain, which ultimately calls apply_model.
-    wrapper = m.model_options.get("model_function_wrapper")
-    for b in bends:
-        mod = build_bending_module(b["module_type"], b["module_args"])
-        mod.steps_to_bend = steps_to_bend
-        wrapper = make_bending_unet_wrapper(target_module, [b["path"]], mod, wrapper)
-    if wrapper is not None:
-        m.set_model_unet_function_wrapper(wrapper)
+    if selected_part and selected_part != "diffusion_model":
+        try:
+            target_module = resolve_module(get_root_module(m), selected_part)
+        except (AttributeError, KeyError, IndexError, TypeError):
+            problems.append(f"selected_part {selected_part!r} not found on this model; "
+                            "resolving paths from diffusion_model")
+    if clamp == "safe" and not safe_ranges:
+        problems.append("clamp='safe' without safe_ranges; using each op's hard limits")
+    default_steps = parse_step_str_to_ranges(_steps_str(steps_min, steps_max), max_steps=max_denoising_steps)
+    specs = []
+    for i, b in enumerate(bends):
+        where = f"bend #{i} ({b['path']}): "
+        op = _resolve_op(b, where, problems)
+        steps = default_steps
+        if b.get("steps") is not None:
+            steps = parse_step_str_to_ranges(str(b["steps"]), max_steps=max_denoising_steps)
+            if steps is None and str(b["steps"]).strip() not in ("", "*"):
+                problems.append(f"{where}steps {b['steps']!r} is not a valid step list; bending all steps")
+        blend = b.get("blend", 1.0)
+        try:
+            blend = float(blend)
+        except (TypeError, ValueError):
+            problems.append(f"{where}blend {blend!r} is not a number; using 1")
+            blend = 1.0
+        if not 0.0 <= blend <= 1.0:
+            problems.append(f"{where}blend {blend} is outside 0..1; clamped")
+            blend = max(0.0, min(1.0, blend))
+        guard = _check_guard(b.get("guard"), where, problems)
+        t_window = _parse_t_window(b.get("t"))
+
+        paths = expand_path_pattern(target_module, b["path"])
+        if not paths:
+            problems.append(f"{where}the pattern matched no layers")
+            continue
+        if paths != [b["path"]] and report is not None:
+            report.setdefault("patterns", []).append({"path": b["path"], "matches": paths})
+        for path in paths:
+            hooked, mod = resolve_hook_target(target_module, path, strict=strict, report=report)
+            if mod is None:
+                continue
+            final = _clamp_op(op, hooked, clamp, safe_ranges, report)
+            specs.append(BendSpec(hooked, _build_op(final), steps_to_bend=steps, t_window=t_window,
+                                  blend=blend, label=b.get("label"), guard=guard))
+            if resolved is not None:
+                entry = {"path": hooked, **final}
+                for key in ("steps", "t", "label"):
+                    if b.get(key) is not None:
+                        entry[key] = b[key]
+                if blend != 1.0:
+                    entry["blend"] = blend
+                if guard:
+                    entry["guard"] = guard
+                resolved.append(entry)
+
+    finish()
+    prev_wrapper = m.model_options.get("model_function_wrapper")
+    m.set_model_unet_function_wrapper(
+        make_bends_wrapper(target_module, specs, prev_wrapper=prev_wrapper, strict=strict, report=report,
+                           reverse_hooks=True)
+    )
     return (m,)
 
 
@@ -1113,6 +1369,7 @@ class InteractiveBendingWebUI:
             steps_min=getattr(sel, "steps_min", None),
             steps_max=getattr(sel, "steps_max", None),
             max_denoising_steps=getattr(sel, "max_denoising_steps", 200),
+            selected_part=getattr(sel, "selected_part", None),
         )
 
 
@@ -1123,11 +1380,18 @@ class InteractiveBendingWebUI:
 class ApplyBendsFromJSON:
     """
     Apply bends by pasting the JSON copied from the web interface (Copy Bends button).
-    Same format as the clipboard: { "bends": [...], "steps_min": ?, "steps_max": ?, "max_denoising_steps": ? }.
+    Same format as the clipboard: { "bends": [...], "steps_min": ?, "steps_max": ?, "max_denoising_steps": ? },
+    plus the optional version 1.1 fields documented in parse_bends_json.
+    {{a}} ... {{d}} placeholders are replaced by the optional a..d inputs, so sliders can drive the JSON.
+    Outputs a report and resolved_json: the same bends with every layer, argument and default made explicit.
     """
+
+    PLACEHOLDER = re.compile(r"\{\{\s*([abcd])\s*\}\}")
 
     @classmethod
     def INPUT_TYPES(cls):
+        value = {"default": 0.0, "min": -1000.0, "max": 1000.0, "step": 0.01,
+                 "tooltip": "Replaces {{name}} in bends_json"}
         return {
             "required": {
                 "model": ("MODEL",),
@@ -1137,38 +1401,87 @@ class ApplyBendsFromJSON:
                     "placeholder": "Paste JSON from web UI (Copy Bends)...",
                 }),
             },
+            "optional": {
+                "strict": ("BOOLEAN", {"default": False,
+                                       "tooltip": "Fail on any problem (unknown keys or arguments, paths that "
+                                                  "cannot be bent, ...) instead of warning"}),
+                "a": ("FLOAT", value),
+                "b": ("FLOAT", value),
+                "c": ("FLOAT", value),
+                "d": ("FLOAT", value),
+                "clamp": (["none", "hard", "safe"], {
+                    "default": "none",
+                    "tooltip": "hard: each op's absolute limits; safe: hard limits narrowed by safe_ranges"}),
+                "safe_ranges": ("STRING", {
+                    "default": "",
+                    "multiline": True,
+                    "placeholder": '{"multiply": {"scalar": [0, 3]}, "paths": {"output_blocks.*": '
+                                   '{"multiply": {"scalar": [0.5, 1.5]}}}}',
+                }),
+            },
         }
 
-    RETURN_TYPES = ("MODEL",)
+    RETURN_TYPES = ("MODEL", "STRING", "STRING")
+    RETURN_NAMES = ("MODEL", "report", "resolved_json")
     FUNCTION = "patch"
     CATEGORY = "model_bending_demo"
 
-    def patch(self, model, bends_json):
+    def patch(self, model, bends_json, strict=False, a=0.0, b=0.0, c=0.0, d=0.0, clamp="none", safe_ranges=""):
         bends_json = (bends_json or "").strip()
         if not bends_json:
-            return (model,)
+            return (model, json.dumps({"resolved": [], "note": "empty bends_json"}), json.dumps({"bends": []}))
+        values = {"a": a, "b": b, "c": c, "d": d}
+        used = sorted(set(self.PLACEHOLDER.findall(bends_json)))
+        bends_json = self.PLACEHOLDER.sub(lambda mt: repr(float(values[mt.group(1)])), bends_json)
+        ranges = None
+        if (safe_ranges or "").strip():
+            try:
+                ranges = json.loads(safe_ranges)
+            except json.JSONDecodeError as e:
+                raise ValueError(f"safe_ranges is not valid JSON: {e}") from e
+            if not isinstance(ranges, dict):
+                raise ValueError("safe_ranges must be a JSON object")
+        problems: List[str] = []
         try:
-            bends, steps_min, steps_max, max_denoising_steps, selected_part = parse_bends_json(bends_json)
+            bends, steps_min, steps_max, max_denoising_steps, selected_part = parse_bends_json(bends_json, problems)
         except ValueError as e:
             raise ValueError(f"Bends JSON error: {e}") from e
-        return apply_bends_to_model(
+        report: Dict[str, Any] = {"placeholders": {k: values[k] for k in used}} if used else {}
+        if clamp != "none":
+            report["clamp"] = clamp
+        resolved: List[Dict[str, Any]] = []
+        (patched,) = apply_bends_to_model(
             model, bends,
             steps_min=steps_min,
             steps_max=steps_max,
             max_denoising_steps=max_denoising_steps,
+            selected_part=selected_part,
+            strict=strict,
+            report=report,
+            clamp=clamp,
+            safe_ranges=ranges,
+            problems=problems,
+            resolved=resolved,
         )
+        canonical = {"version": BENDS_JSON_VERSION, "bends": resolved, "steps_min": steps_min, "steps_max": steps_max,
+                     "max_denoising_steps": max_denoising_steps, "selected_part": selected_part}
+        canonical = {k: v for k, v in canonical.items() if v is not None}
+        return (patched, json.dumps(report, indent=2), json.dumps(canonical, indent=2))
 
 
 # Import standalone model bending nodes and merge their mappings
 from . import model_bending_nodes
+from . import probe_nodes
 
 NODE_CLASS_MAPPINGS = {
     "InteractiveBendingWebUI": InteractiveBendingWebUI,
     "ApplyBendsFromJSON": ApplyBendsFromJSON,
 }
 NODE_CLASS_MAPPINGS.update(model_bending_nodes.NODE_CLASS_MAPPINGS)
+NODE_CLASS_MAPPINGS.update(probe_nodes.NODE_CLASS_MAPPINGS)
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "InteractiveBendingWebUI": "Interactive Bending WebUI",
     "ApplyBendsFromJSON": "Apply Bends from JSON",
 }
+NODE_DISPLAY_NAME_MAPPINGS.update(probe_nodes.NODE_DISPLAY_NAME_MAPPINGS)

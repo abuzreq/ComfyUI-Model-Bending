@@ -1,5 +1,7 @@
 # Shared bending module classes used by both web UI and standalone model bending nodes.
 # Kept in one place to avoid duplication between nodes.py and model_bending_nodes.py.
+import math
+
 import torch
 import torch.nn as nn
 from .bendutils import operations
@@ -59,6 +61,18 @@ class BendingModule(nn.Module):
         super().__init__()
 
     def forward(self, x, *args, **kwargs):
+        if not isinstance(x, torch.Tensor):
+            raise TypeError(
+                f"[model-bending] bending expects a tensor but the hooked module returned {type(x).__name__}. "
+                "Transformer blocks that return tuples can be bent with 'DiT Block Bending'."
+            )
+        if x.ndim == 5:
+            # Video tensors (B, C, T, H, W): fold time into the batch so 4-D ops act on each frame.
+            b, c, t, h, w = x.shape
+            folded = x.permute(0, 2, 1, 3, 4).reshape(b * t, c, h, w)
+            out = self.forward(folded, *args, **kwargs)
+            return out.reshape(b, t, c, out.shape[-2], out.shape[-1]).permute(0, 2, 1, 3, 4)
+
         num_unsqueeze_added = 0
         if x.ndim == 2:
             x = x.unsqueeze(0).unsqueeze(0)
@@ -67,7 +81,7 @@ class BendingModule(nn.Module):
             x = x.unsqueeze(0)
             num_unsqueeze_added = 1
         elif x.ndim != 4:
-            raise ValueError(f"Input tensor must be 3D or 4D, but got ndim={x.ndim}")
+            raise ValueError(f"[model-bending] input tensor must be 2D-5D, but got ndim={x.ndim}")
 
         if (hasattr(self, 'current_step') and hasattr(self, 'steps_to_bend') and self.current_step is not None and self.steps_to_bend is not None):
             if self.current_step in self.steps_to_bend:
@@ -83,6 +97,48 @@ class BendingModule(nn.Module):
 
     def bend(self, x, *args, **kwargs):
         raise NotImplementedError("Subclasses must implement the bend() method.")
+
+
+class GatedBendingModule(nn.Module):
+    """
+    Wraps a bending module with a diffusion-time window [t_end, t_start] (normalised t, 1 = pure noise).
+    The appliers read weight(t) and blend: x + w(t) * (bend(x) - x). Outside the window w = 0.
+    ramp: "hard" (w = 1 inside), "linear" or "cosine" (w rises over ramp_width at both edges).
+    """
+    is_gated = True
+
+    def __init__(self, module, t_start=1.0, t_end=0.0, ramp="hard", ramp_width=0.1):
+        super().__init__()
+        self.inner = module
+        self.t_start = max(t_start, t_end)
+        self.t_end = min(t_start, t_end)
+        self.ramp = ramp
+        self.ramp_width = max(0.0, ramp_width)
+
+    def weight(self, t):
+        if t is None:
+            return 1.0
+        if t > self.t_start or t < self.t_end:
+            return 0.0
+        if self.ramp == "hard" or self.ramp_width <= 0:
+            return 1.0
+        # Ramp only at interior edges: a window that starts at pure noise (1.0) or ends at the clean image
+        # (0.0) has nothing to fade in from or out to.
+        distances = []
+        if self.t_start < 1.0:
+            distances.append(self.t_start - t)
+        if self.t_end > 0.0:
+            distances.append(t - self.t_end)
+        if not distances:
+            return 1.0
+        edge = max(0.0, min(1.0, min(distances) / self.ramp_width))
+        if self.ramp == "cosine":
+            return 0.5 - 0.5 * math.cos(math.pi * edge)
+        return edge
+
+    def forward(self, x, *args, **kwargs):
+        # Called directly only when an applier does not know about gating: bend unconditionally.
+        return self.inner(x, *args, **kwargs)
 
 
 
@@ -101,8 +157,9 @@ class FourierAmplifyModule(BendingModule):
     def bend(self, x, *args, **kwargs):
         # 1. FFT to Frequency Domain
         # We use .float() because FFT typically requires float32/64
-        sample_fft = torch.fft.fftn(x.float())
-        sample_fft_shifted = torch.fft.fftshift(sample_fft)
+        # 2-D FFT per sample and channel: transforming all dims would mix the cond/uncond batch and channels.
+        sample_fft = torch.fft.fft2(x.float(), dim=(-2, -1))
+        sample_fft_shifted = torch.fft.fftshift(sample_fft, dim=(-2, -1))
 
         # 2. Create the Low-Pass Mask
         b, c, h, w = x.shape
@@ -128,8 +185,8 @@ class FourierAmplifyModule(BendingModule):
                                (sample_fft_shifted * mask * self.amp_factor)
 
         # 4. Inverse FFT to Spatial Domain
-        sample_fft_ishifted = torch.fft.ifftshift(sample_fft_filtered)
-        denoised_sample = torch.fft.ifftn(sample_fft_ishifted).real
+        sample_fft_ishifted = torch.fft.ifftshift(sample_fft_filtered, dim=(-2, -1))
+        denoised_sample = torch.fft.ifft2(sample_fft_ishifted, dim=(-2, -1)).real
 
         # Return to original dtype (e.g., float16 if working with SDXL/Latents)
         return denoised_sample.to(x.dtype)

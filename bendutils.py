@@ -1065,72 +1065,427 @@ def resolve_module(root: nn.Module, layer_path: str):
     return cur
 
 
-def make_bending_unet_wrapper(unet: nn.Module, mod_paths, bending_module: nn.Module, prev_wrapper=None):
-    """
-    Return a model_function_wrapper that:
-    1. Sets bending_module.current_step from transformer_options (step tracking).
-    2. Registers a forward hook on each target module right before calling apply_model.
-    3. Calls prev_wrapper (or apply_model directly) so multiple bending nodes chain.
-    4. Removes every hook in a finally block so no hooks persist between steps or
-       across parallel ComfyUI branches.
+# ---------------------------------------------------------------------------
+# Hook engine shared by every applier (Model Bending, SD Blocks, JSON, probes, steering)
+# ---------------------------------------------------------------------------
 
-    mod_paths: list of resolved dot-separated paths (relative to unet).
-    prev_wrapper: the prior model_function_wrapper from model_options, or None.
+LOG_TAG = "[model-bending]"
+log = logging.getLogger("model-bending")
+
+
+def warn(msg, *args):
+    log.warning(LOG_TAG + " " + msg, *args)
+
+
+def info(msg, *args):
+    log.info(LOG_TAG + " " + msg, *args)
+
+
+def _is_bypassed_container(mod: nn.Module) -> bool:
     """
-    # Resolve target modules up front; skip any that are nn.ModuleList.
-    targets = []
-    for p in mod_paths:
-        if not p:
-            continue
-        try:
-            mod = resolve_module(unet, p)
-        except (AttributeError, KeyError, IndexError, TypeError) as exc:
-            logging.warning("make_bending_unet_wrapper: could not resolve path %r: %s", p, exc)
-            continue
-        if isinstance(mod, nn.ModuleList):
-            logging.warning(
-                "make_bending_unet_wrapper: path %r resolves to nn.ModuleList which cannot be "
-                "hooked directly; skipping. Hook a specific child instead.", p
+    True for containers whose own forward() is never called by the model, so hooks on them never fire.
+    ComfyUI's UNet runs TimestepEmbedSequential blocks via forward_timestep_embed(), which iterates the
+    children directly.
+    """
+    return any(cls.__name__ == "TimestepEmbedSequential" for cls in type(mod).__mro__)
+
+
+def _close_matches(root: nn.Module, path: str, n=5):
+    import difflib
+    names = [name for name, _ in root.named_modules() if name]
+    return difflib.get_close_matches(path, names, n=n, cutoff=0.6)
+
+
+def resolve_hook_target(root: nn.Module, path: str, strict: bool = False, report: dict = None):
+    """
+    Resolve a layer path to a module a forward hook will actually fire on.
+    - Containers bypassed by the model's forward (TimestepEmbedSequential) expand to their last child,
+      whose output is the container's output.
+    - nn.ModuleList cannot be called and is skipped.
+    Returns (hooked_path, module); module is None when the path is skipped. strict=True raises instead.
+    """
+    def skip(reason):
+        if strict:
+            raise ValueError(f"{LOG_TAG} {reason}")
+        warn(reason)
+        if report is not None:
+            report.setdefault("skipped", []).append({"path": path, "reason": reason})
+        return path, None
+
+    try:
+        mod = resolve_module(root, path)
+    except (AttributeError, KeyError, IndexError, TypeError, ValueError) as exc:
+        hint = _close_matches(root, path)
+        return skip(f"could not resolve path {path!r} ({exc})" + (f"; did you mean {' | '.join(hint)}?" if hint else ""))
+
+    hooked = path
+    while _is_bypassed_container(mod):
+        children = list(mod.named_children())
+        if not children:
+            return skip(f"path {path!r} is an empty container")
+        last_name, mod = children[-1]
+        hooked = f"{hooked}.{last_name}"
+    if hooked != path:
+        info("expanded container %s -> %s (the container's forward is never called)", path, hooked)
+        if report is not None:
+            report.setdefault("expanded", []).append({"path": path, "hooked": hooked})
+
+    if isinstance(mod, nn.ModuleList):
+        n = len(mod)
+        return skip(f"path {path!r} is a ModuleList, which is never called; hook one of {path}.0 ... {path}.{n - 1}")
+    return hooked, mod
+
+
+WILDCARD_CHARS = set("*?[")
+
+
+def has_wildcard(path: str) -> bool:
+    return any(ch in WILDCARD_CHARS for ch in path)
+
+
+def expand_path_pattern(root: nn.Module, pattern: str):
+    """
+    Expand a dotted path whose segments may use shell wildcards ('output_blocks.*.1', 'input_blocks.[4-8].0',
+    '*.attn2') against the module tree, in model order. Paths without wildcards are returned unchanged.
+    """
+    import fnmatch
+    pattern = pattern.strip()
+    if not has_wildcard(pattern):
+        return [pattern]
+    frontier = [("", root)]
+    for part in pattern.split("."):
+        nxt = []
+        for path, mod in frontier:
+            for name, child in mod.named_children():
+                if fnmatch.fnmatchcase(name, part):
+                    nxt.append((f"{path}.{name}" if path else name, child))
+        frontier = nxt
+    order = {name: i for i, (name, _) in enumerate(root.named_modules())}
+    return sorted((p for p, _ in frontier), key=lambda p: order.get(p, len(order)))
+
+
+def current_step(transformer_options):
+    """Index of the current denoising step, derived from the sampler's sigma schedule (None if unknown)."""
+    transformer_options = transformer_options or {}
+    schedule = transformer_options.get("sample_sigmas")
+    cur = transformer_options.get("sigmas")
+    if schedule is None or cur is None:
+        return None
+    try:
+        schedule = schedule.detach().float().cpu()
+        c = float(cur.detach().float().flatten()[0].cpu())
+        close = torch.isclose(schedule, torch.tensor(c), rtol=1e-4, atol=1e-6).nonzero(as_tuple=True)[0]
+        if close.numel() > 0:
+            return int(close[0])
+        # Intermediate sigma (e.g. 2nd-order samplers): belongs to the step whose interval contains it.
+        return max(0, int((schedule > c).sum()) - 1)
+    except Exception:
+        return None
+
+
+def total_steps(transformer_options):
+    schedule = (transformer_options or {}).get("sample_sigmas")
+    if schedule is None:
+        return None
+    return max(1, len(schedule) - 1)
+
+
+def model_sampling_of(apply_model):
+    """
+    The model_sampling object behind the apply_model passed to a model_function_wrapper: either the bound
+    BaseModel.apply_model, or a replacement function that carries it as a `model_sampling` attribute
+    (see with_model_sampling, used by wrappers that pass their own function down the chain).
+    """
+    ms = getattr(apply_model, "model_sampling", None)
+    if ms is not None:
+        return ms
+    owner = getattr(apply_model, "__self__", None)
+    return getattr(owner, "model_sampling", None)
+
+
+def with_model_sampling(fn, apply_model):
+    """Tag a replacement apply function so wrappers below it can still resolve diffusion time."""
+    fn.model_sampling = model_sampling_of(apply_model)
+    return fn
+
+
+def normalized_t(model_sampling, sigma):
+    """
+    Diffusion time in [0, 1] (1 = pure noise) for the current sigma: model_sampling.timestep(sigma) rescaled
+    by the model's own range. Discrete eps/v models give timestep/999; flow models (Flux, SD3) give sigma,
+    so windows follow the noise level independently of step count, scheduler, shift or denoise.
+    """
+    if model_sampling is None or sigma is None:
+        return None
+    try:
+        s = sigma.detach().flatten()[:1] if isinstance(sigma, torch.Tensor) else torch.tensor([float(sigma)])
+        ts = float(model_sampling.timestep(s.float()).flatten()[0])
+        t_max = float(model_sampling.timestep(torch.as_tensor(model_sampling.sigma_max).reshape(1).float()).flatten()[0])
+        t_min = float(model_sampling.timestep(torch.as_tensor(model_sampling.sigma_min).reshape(1).float()).flatten()[0])
+        if t_max == t_min:
+            return None
+        return min(1.0, max(0.0, (ts - t_min) / (t_max - t_min)))
+    except Exception:
+        return None
+
+
+def t_window_from(t_start, t_end):
+    """(hi, lo) window, or None when it covers the whole [0, 1] range."""
+    hi, lo = max(t_start, t_end), min(t_start, t_end)
+    if hi >= 1.0 and lo <= 0.0:
+        return None
+    return (hi, lo)
+
+
+def in_window(step, t, steps_to_bend=None, t_window=None):
+    if steps_to_bend is not None and step is not None and step not in steps_to_bend:
+        return False
+    if t_window is not None and t is not None:
+        hi, lo = max(t_window), min(t_window)
+        if t > hi + 1e-6 or t < lo - 1e-6:
+            return False
+    return True
+
+
+GUARD_NAN_MODES = ("zero", "clamp", "none")
+
+
+def blend_and_guard(x, y, weight, on_nonfinite=None, guard=None, flags=None):
+    """
+    x + weight * (y - x), then the guard:
+    - "nan": "zero" (default) replaces NaN/Inf with 0, "clamp" maps NaN to 0 and Inf to the dtype's range,
+      "none" leaves them
+    - "max_std_ratio": r shrinks the result around its mean so its std is at most r times the unbent std
+    - "preserve_norm": true rescales each channel to the unbent channel's L2 norm (changes direction, not energy)
+    Non-finite detection: with `flags` (a list), a device-side flag tensor is appended and no sync happens; the
+    caller checks the flags once per forward pass. Without it, on_nonfinite is called right away (one sync).
+    """
+    guard = guard or {}
+    if weight != 1.0:
+        y = x + weight * (y - x)
+    if not y.is_floating_point():
+        return y
+    nan_mode = guard.get("nan", "zero")
+    if nan_mode != "none":
+        if flags is not None:
+            flags.append(~torch.isfinite(y).all())
+            replace = True  # nan_to_num is the identity on finite values, so apply it without looking
+        else:
+            replace = not bool(torch.isfinite(y).all())
+            if replace and on_nonfinite is not None:
+                on_nonfinite()
+        if replace and nan_mode == "clamp":
+            info = torch.finfo(y.dtype)
+            y = torch.nan_to_num(y, nan=0.0, posinf=info.max, neginf=info.min)
+        elif replace:
+            y = torch.nan_to_num(y, nan=0.0, posinf=0.0, neginf=0.0)
+    ratio = guard.get("max_std_ratio")
+    if ratio and y.numel() > 1:
+        yf = y.float()
+        mean = yf.mean()
+        factor = (float(ratio) * x.float().std() / yf.std().clamp_min(1e-12)).clamp(max=1.0)
+        y = (mean + (yf - mean) * factor).to(y.dtype)
+    if guard.get("preserve_norm") and y.shape == x.shape and y.ndim >= 2:
+        cdim = y.ndim - 1 if y.ndim == 3 else 1
+        other = tuple(d for d in range(y.ndim) if d != cdim)
+        nx = x.float().pow(2).sum(dim=other, keepdim=True).sqrt()
+        ny = y.float().pow(2).sum(dim=other, keepdim=True).sqrt()
+        y = (y.float() * nx / ny.clamp_min(1e-12)).to(y.dtype)
+    return y
+
+
+class BendSpec:
+    """One bend: a module applied at one or more paths, with optional step/t windows and blend weight."""
+
+    def __init__(self, paths, module, steps_to_bend=None, t_window=None, blend=1.0, label=None, guard=None):
+        self.paths = [paths] if isinstance(paths, str) else list(paths)
+        self.module = module
+        self.steps_to_bend = steps_to_bend
+        self.t_window = t_window
+        self.blend = float(blend)
+        self.label = label
+        self.guard = guard
+
+
+def make_bends_wrapper(unet: nn.Module, specs, prev_wrapper=None, strict: bool = False, report: dict = None,
+                       reverse_hooks: bool = False):
+    """
+    Return a model_function_wrapper that, for each forward pass:
+    1. works out the current step and normalised t,
+    2. registers forward hooks only for the bends whose window contains them,
+    3. calls prev_wrapper (or apply_model) so several bending nodes chain,
+    4. removes every hook in a finally block, so nothing persists on the shared model.
+    No state is written to the bending modules, so one module can feed several appliers.
+    Bends on the same module run in list order; reverse_hooks=True runs them last-to-first instead
+    (the historical order of bends from JSON, which used one nested wrapper per bend).
+    """
+    resolved = []
+    for spec in specs:
+        targets = []
+        for p in spec.paths:
+            if not p:
+                continue
+            hooked, mod = resolve_hook_target(unet, p, strict=strict, report=report)
+            if mod is not None:
+                targets.append((hooked, mod))
+        resolved.append((spec, targets))
+        if report is not None:
+            report.setdefault("resolved", []).extend(
+                {"path": h, "op": type(_ungated(spec.module)).__name__, "label": spec.label,
+                 "steps": spec.steps_to_bend, "t": list(spec.t_window) if spec.t_window else None,
+                 "blend": spec.blend, **({"guard": spec.guard} if spec.guard else {})}
+                for h, _ in targets
             )
-            continue
-        targets.append(mod)
+
+    needs_t = any(s.t_window is not None or _is_gated(s.module) for s, _ in resolved)
+    warned = set()
+    ever_fired = set()
+
+    def warn_once(key, msg, *args):
+        if key not in warned:
+            warned.add(key)
+            warn(msg, *args)
+
+    def make_hook(path, module, weight, guard, flags):
+        def bend(x, args, kwargs):
+            return blend_and_guard(x, module(x, *args, **kwargs), weight, guard=guard, flags=flags)
+
+        def _hook(mod, args, kwargs, output):
+            ever_fired.add(path)
+            if isinstance(output, torch.Tensor):
+                return bend(output, args, kwargs)
+            if isinstance(output, (tuple, list)) and output and isinstance(output[0], torch.Tensor):
+                msg = (f"{path} returns a {type(output).__name__} of {len(output)} tensors; only the first is bent. "
+                       "Use 'DiT Block Bending' for transformer blocks, or hook a Linear/Conv child.")
+                if strict:
+                    raise ValueError(f"{LOG_TAG} {msg}")
+                warn_once(("tuple", path), msg)
+                return type(output)([bend(output[0], args, kwargs), *output[1:]])
+            msg = f"{path} returns {type(output).__name__}, which cannot be bent"
+            if strict:
+                raise ValueError(f"{LOG_TAG} {msg}")
+            warn_once(("type", path), msg)
+            return None
+        return _hook
 
     def wrapper(apply_model, params):
-        inp = params["input"]
-        timestep = params["timestep"]
-        c = params["c"]
+        c = params["c"] or {}
+        transformer_options = c.get("transformer_options", {})
+        step = current_step(transformer_options)
+        t = normalized_t(model_sampling_of(apply_model), params["timestep"]) if needs_t else None
+        if needs_t and t is None:
+            # Fail closed: a bend that must follow diffusion time is skipped rather than applied at every step.
+            msg = ("cannot resolve diffusion time (no model_sampling reachable from apply_model); "
+                   "time-windowed bends are skipped for this pass")
+            if strict:
+                raise ValueError(f"{LOG_TAG} {msg}")
+            warn_once("no_t", msg)
 
-        # Step tracking: update bending_module.current_step if sigmas are available.
-        transformer_options = (c or {}).get("transformer_options", {})
-        sigmas = transformer_options.get("sample_sigmas")
-        if sigmas is not None:
-            try:
-                sigmas_cpu = sigmas.to(device="cpu")
-                all_sigmas = transformer_options.get("sigmas")
-                if all_sigmas is not None:
-                    all_sigmas_cpu = all_sigmas.to(device="cpu")
-                    idx = (sigmas_cpu == all_sigmas_cpu).nonzero(as_tuple=True)[0]
-                    if idx.numel() > 0:
-                        bending_module.current_step = idx[0].item()
-            except Exception:
-                pass
-
-        # Register a forward hook on each target for the duration of this forward pass.
         handles = []
-        for target in targets:
-            def _hook(module, args, kwargs, output, _bm=bending_module):
-                return _bm(output, *args, **kwargs)
-            handles.append(target.register_forward_hook(_hook, with_kwargs=True))
+        registered = []
+        flags = []  # device-side non-finite flags, checked once after the forward pass
+        for spec, targets in (reversed(resolved) if reverse_hooks else resolved):
+            windowed = spec.t_window is not None or _is_gated(spec.module)
+            if windowed and t is None:
+                continue
+            if not in_window(step, t, spec.steps_to_bend, spec.t_window):
+                continue
+            weight = spec.blend
+            module = spec.module
+            if _is_gated(module):
+                weight *= module.weight(t)
+                module = module.inner
+            if weight == 0.0:
+                continue
+            for path, target in targets:
+                handles.append(target.register_forward_hook(
+                    make_hook(path, module, weight, spec.guard, flags), with_kwargs=True))
+                registered.append(path)
 
         try:
             if prev_wrapper is not None:
-                return prev_wrapper(apply_model, params)
-            return apply_model(inp, timestep, **c)
+                out = prev_wrapper(apply_model, params)
+            else:
+                out = apply_model(params["input"], params["timestep"], **c)
         finally:
             for h in handles:
                 h.remove()
+        # The forward pass completed: report hooks that were registered but have never fired.
+        for path in registered:
+            if path not in ever_fired:
+                warn_once(("never", path),
+                          "hook on %s never fired: the model's forward does not call this module. "
+                          "Hook one of its children instead.", path)
+        if flags and "nan" not in warned and bool(torch.stack(flags).any()):
+            warn_once("nan", "a bend at %s produced NaN/Inf; replaced", ", ".join(sorted(set(registered))))
+        return out
 
     return wrapper
+
+
+def _is_gated(module):
+    """GatedBendingModule (bending_modules.py) is detected by duck typing to avoid a circular import."""
+    return getattr(module, "is_gated", False)
+
+
+def _ungated(module):
+    return module.inner if _is_gated(module) else module
+
+
+def make_bending_unet_wrapper(unet: nn.Module, mod_paths, bending_module: nn.Module, prev_wrapper=None,
+                              steps_to_bend=None, t_window=None, strict=False, report=None):
+    """
+    Single-module convenience around make_bends_wrapper (kept for existing callers).
+    steps_to_bend defaults to the module's own steps_to_bend attribute (e.g. FourierAmplifyModule).
+    """
+    if steps_to_bend is None:
+        steps_to_bend = getattr(bending_module, "steps_to_bend", None)
+    spec = BendSpec(mod_paths, bending_module, steps_to_bend=steps_to_bend, t_window=t_window)
+    return make_bends_wrapper(unet, [spec], prev_wrapper=prev_wrapper, strict=strict, report=report)
+
+
+# ---------------------------------------------------------------------------
+# Token <-> grid helpers for transformer (DiT) activations
+# ---------------------------------------------------------------------------
+
+def infer_token_grid(num_tokens, latent_shape):
+    """
+    Find the image-token grid for a (B, L, C) activation from the latent shape seen by the wrapper.
+    Returns (frames, h, w) with frames*h*w <= num_tokens, or None. Tokens are assumed to be ordered
+    frame-major, row-major, image first (extra tokens such as Kontext references follow the image).
+    """
+    if latent_shape is None or len(latent_shape) < 4:
+        return None
+    H, W = int(latent_shape[-2]), int(latent_shape[-1])
+    T = int(latent_shape[2]) if len(latent_shape) == 5 else 1
+    best = None
+    for p in (1, 2, 4, 8, 16, 32, 64):
+        h, w = -(-H // p), -(-W // p)
+        for tp in ((1,) if T == 1 else (1, 2, 4)):
+            f = -(-T // tp)
+            n = f * h * w
+            if n == num_tokens:
+                return (f, h, w)
+            if n < num_tokens and (best is None or n > best[0] * best[1] * best[2]):
+                best = (f, h, w)
+    return best
+
+
+def tokens_to_grid(x, grid):
+    """(B, L, C) -> ((B*F, C, h, w), rest) where rest holds tokens beyond the grid (or None)."""
+    f, h, w = grid
+    n = f * h * w
+    b, _, c = x.shape
+    img, rest = x[:, :n], (x[:, n:] if x.shape[1] > n else None)
+    img = img.reshape(b, f, h, w, c).permute(0, 1, 4, 2, 3).reshape(b * f, c, h, w)
+    return img, rest
+
+
+def grid_to_tokens(y, grid, batch, rest=None):
+    f, h, w = grid
+    c = y.shape[1]
+    y = y.reshape(batch, f, c, h, w).permute(0, 1, 3, 4, 2).reshape(batch, f * h * w, c)
+    return torch.cat((y, rest), dim=1) if rest is not None else y
 
 
 def parse_step_str_to_ranges(s, max_steps=1000):

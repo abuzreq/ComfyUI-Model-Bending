@@ -220,3 +220,5 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+# Stray local snapshot
+node.zip
