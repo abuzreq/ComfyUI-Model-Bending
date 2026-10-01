@@ -716,7 +716,6 @@ def add_normal(r):
     Add a 2D normal gaussian (bell curve) to the center of the tensor
     """
     def foo(x):
-        # chatgpt wrote this
         # Define the size of the matrix
         size = 64
 

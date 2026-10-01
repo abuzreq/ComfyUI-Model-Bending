@@ -44,6 +44,7 @@ Version 1.1 only adds optional keys to version 1, so every v1 document is a vali
 | `max_denoising_steps` | int | Upper bound used when a step range is open-ended. Default 200, clamped to 1–1000. |
 | `selected_part` | string | Module that paths are relative to. Default `diffusion_model`. |
 | `version` | number | Optional. A value above 1.1 produces a warning. |
+| `attention_bends` | list | *Experimental.* Attention-map bends for video DiTs (WAN); see [below](#attention_bends-experimental). |
 
 ## Per-bend keys
 
@@ -58,7 +59,7 @@ Version 1.1 only adds optional keys to version 1, so every v1 document is a vali
 | `blend` | 1.1 | 0–1. The result is `x + blend·(bend(x) − x)`. |
 | `label` | 1.1 | Free text, echoed in the node's report. |
 | `guard` | 1.1 | Safety options applied after the bend (see below). |
-| `inner` | 1.1 | The op wrapped by `module_type: "subset"`: `{"module_type", "module_args"}`. |
+| `inner` | 1.1 | The op wrapped by `module_type: "subset"` or `"frame_ramp"`: `{"module_type", "module_args"}`. |
 
 ### `path`
 
@@ -98,8 +99,50 @@ Rough guide: 1–0.7 composition, 0.7–0.2 shapes and style, 0.2–0 detail.
 | `sobel` | `normalized` (true) |
 | `fourier` (1.1) | `cutoff_freq` (5; 0–10), `amp_factor` (2; ±10) |
 | `subset` (1.1) | `percentage` (0.5; 0–1), `dim` (`batch`, `channel` or `spatial`), `seed` (0), plus `inner` |
+| `translate` (1.1, plugin 0.3) | `dx`, `dy` (0; ±1, fractions of width / height), `padding` (`border`, `zeros` or `reflection`) |
+| `flip` (1.1, plugin 0.3) | `direction` (`horizontal`, `vertical` or `both`) |
+| `blur` (1.1, plugin 0.3) | `sigma` (1; 0–20, in latent cells / tokens) |
+| `sharpen` (1.1, plugin 0.3) | `amount` (1; ±10), `sigma` (1; 0.05–20). Unsharp mask: `x + amount·(x − blur(x))` |
+| `temporal_shift` (1.1, plugin 0.3) | `frames` (1; ±64 latent frames), `padding` (`border`, `wrap` or `zeros`). Video only. |
+| `temporal_blur` (1.1, plugin 0.3) | `sigma` (1; 0–16 latent frames). Video only. |
+| `frame_reverse` (1.1, plugin 0.3) | none. Video only. |
+| `frame_ramp` (1.1, plugin 0.3) | `w_start` (0), `w_end` (1) (±4), `curve` (`linear`, `ease_in`, `ease_out`, `smooth`, `triangle`), plus `inner`: the inner op's strength changes over the frames. |
+
+Ops act on each frame of a video (5-D) activation, except the temporal ones, which act across frames. On video
+DiTs (WAN), token outputs are laid out on their frames × height × width grid first.
 
 The hard limits are enforced only when the node's `clamp` input is `hard` or `safe`.
+
+## `attention_bends` (experimental)
+
+Bends attention maps of video DiTs (WAN 2.1 / 2.2), like the *Attention Map Bending* node. Each item:
+
+```json
+{
+  "attention_bends": [
+    {
+      "module_type": "rotate", "module_args": {"angle_degrees": 12},
+      "attention": "cross_text", "blocks": "13-18", "tokens": "all",
+      "renormalize": "keys", "apply_to": "both",
+      "heads": "*", "frames": "*", "steps": "0-2", "t": [1.0, 0.0], "blend": 1.0, "label": "early rotation"
+    }
+  ]
+}
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `module_type`, `module_args`, `inner` | | Any op from the table above. |
+| `attention` | `cross_text` | `cross_text` (video ↔ prompt), `cross_image` (video ↔ CLIP image, WAN 2.1 I2V), `self_query`, `self_key`. |
+| `blocks` | `*` | Block indices, e.g. `13-18`. |
+| `tokens` | `all` | Cross attention only: `all`, `prompt` (without padding) or indices `0-3, 7`. Prompt words need the text encoder, so they only work in the node. |
+| `renormalize` | `keys` | `keys`, `per_token_mass` or `none`. `multiply` needs `none`. |
+| `apply_to` | `both` | CFG passes: `both`, `cond` or `uncond`. |
+| `heads`, `frames`, `steps` | `*` | Index lists. `frames` are latent frames. |
+| `t`, `blend`, `label` | | As for bends. |
+
+The item may be the only content of the document (`bends` can be empty). The report and `resolved_json` list each
+attention bend with its blocks and arguments made explicit.
 
 ## Rules for tools
 
@@ -135,14 +178,14 @@ These are node inputs, not part of the JSON:
 | Reader | v1 document | 1.1 document |
 |---|---|---|
 | This version | Unchanged behaviour | Full support |
-| Older plugin versions | Supported | New keys are ignored, so windows, blend and guards do not apply. Wildcard paths are skipped with a warning. `subset` and `fourier` raise "Unknown module_type". |
+| Older plugin versions | Supported | New keys are ignored, so windows, blend and guards do not apply. Wildcard paths are skipped with a warning. `subset`, `fourier` and the ops added in plugin 0.3 raise "Unknown module_type". `attention_bends` is ignored with a warning. |
 
 ## Limits to know
 
 - The web UI keeps the 1.1 keys of a bend it receives, and sends them back when you move that bend's slider,
   but it has no controls to edit them. It writes three ops itself: `add_noise`, `multiply` and `rotate`.
 - The web UI stores one bend per layer path. `Apply Bends from JSON` accepts several.
-- `subset` with `percentage` 0 or 1 does nothing, and it needs a 4-D activation.
+- `subset` with `percentage` 0 or 1 does nothing. On token (3-D) activations only `batch` and `channel` are meaningful.
 
 ## Where the code is
 
@@ -158,6 +201,7 @@ Readers and validation, in [`nodes.py`](../nodes.py):
 | `_clamp_op` | `clamp` and `safe_ranges` |
 | `apply_bends_to_model` | Turns bends into hooks and builds the report and the resolved form |
 | `ApplyBendsFromJSON` | The node: placeholders, `strict`, `clamp`, `report`, `resolved_json` |
+| `apply_attention_bends_json` ([`attention_bending.py`](../attention_bending.py)) | `attention_bends` |
 | `api_get_selection`, `api_set_selection` | `GET` / `POST /web_bend_demo/selection` |
 
 Semantics, in [`bendutils.py`](../bendutils.py):
@@ -178,4 +222,5 @@ Writers, in the web UI:
 | [`web/js/config.js`](../web/js/config.js) | `BENDING_TYPES`: the ops the web UI can create |
 
 Worked examples: the `test_json_*` and `test_web_ui_selection_route_keeps_v11_keys` tests in
-[`tests/test_hooks.py`](../tests/test_hooks.py), and [`tests/test_web_bend_store.js`](../tests/test_web_bend_store.js).
+[`tests/test_hooks.py`](../tests/test_hooks.py), `test_bends_json_new_ops_and_attention_bends` in
+[`tests/test_video.py`](../tests/test_video.py), and [`tests/test_web_bend_store.js`](../tests/test_web_bend_store.js).
