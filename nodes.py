@@ -36,6 +36,16 @@ from .bending_modules import (
     GradientModule,
     SobelModule,
     ApplyToRandomSubsetModule,
+    PADDING_MODES,
+    TranslateModule,
+    FlipModule,
+    GaussianBlurModule,
+    SharpenModule,
+    FRAME_CURVES,
+    FrameRampModule,
+    TemporalShiftModule,
+    TemporalBlurModule,
+    FrameReverseModule,
 )
 
 try:
@@ -74,7 +84,8 @@ SELECTION_BY_SESSION: Dict[str, BendSelection] = {}
 # Version 1.1 only adds optional keys to v1, so older plugin versions still apply the bends (less precisely)
 # instead of skipping them, and v1 JSON keeps working unchanged.
 BENDS_JSON_VERSION = 1.1
-_TOP_KEYS = {"bends", "bend", "steps_min", "steps_max", "max_denoising_steps", "selected_part", "version"}
+_TOP_KEYS = {"bends", "bend", "steps_min", "steps_max", "max_denoising_steps", "selected_part", "version",
+             "attention_bends"}
 _BEND_KEYS = {"path", "module_type", "module_args", "angle", "steps", "t", "blend", "label", "guard", "inner"}
 
 # name -> (factory, {arg: (type, default, hard limits)}). Hard limits mirror the matching module nodes'
@@ -96,7 +107,20 @@ BEND_OPS: Dict[str, tuple] = {
     "subset": (ApplyToRandomSubsetModule, {"percentage": (float, 0.5, (0.0, 1.0)),
                                            "dim": (str, "batch", ("batch", "channel", "spatial")),
                                            "seed": (int, 0, None)}),
+    "translate": (TranslateModule, {"dx": (float, 0.0, (-1.0, 1.0)), "dy": (float, 0.0, (-1.0, 1.0)),
+                                    "padding": (str, "border", PADDING_MODES)}),
+    "flip": (FlipModule, {"direction": (str, "horizontal", ("horizontal", "vertical", "both"))}),
+    "blur": (GaussianBlurModule, {"sigma": (float, 1.0, (0.0, 20.0))}),
+    "sharpen": (SharpenModule, {"amount": (float, 1.0, (-10.0, 10.0)), "sigma": (float, 1.0, (0.05, 20.0))}),
+    # Video (experimental): act across latent frames. frame_ramp applies its "inner" op with a per-frame strength.
+    "temporal_shift": (TemporalShiftModule, {"frames": (int, 1, (-64, 64)),
+                                             "padding": (str, "border", ("border", "wrap", "zeros"))}),
+    "temporal_blur": (TemporalBlurModule, {"sigma": (float, 1.0, (0.0, 16.0))}),
+    "frame_reverse": (FrameReverseModule, {}),
+    "frame_ramp": (FrameRampModule, {"w_start": (float, 0.0, (-4.0, 4.0)), "w_end": (float, 1.0, (-4.0, 4.0)),
+                                     "curve": (str, "linear", FRAME_CURVES)}),
 }
+_INNER_OPS = ("subset", "frame_ramp")  # ops that wrap an "inner" op
 
 
 def _normalize_module_args(module_args: dict) -> Dict[str, Any]:
@@ -157,15 +181,15 @@ def _resolve_op(node: Dict[str, Any], where: str, problems: List[str]) -> Dict[s
             problems.append(f"{where}unknown argument {name!r} for {module_type} (ignored); "
                             + (f"did you mean {hint[0]!r}?" if hint else f"accepted: {', '.join(spec)}"))
     op = {"module_type": module_type, "module_args": args}
-    if module_type == "subset":
+    if module_type in _INNER_OPS:
         inner = node.get("inner")
         if not isinstance(inner, dict) or not inner.get("module_type"):
-            raise ValueError(f"{where}subset needs an 'inner' bend with a module_type")
+            raise ValueError(f"{where}{module_type} needs an 'inner' bend with a module_type")
         op["inner"] = _resolve_op({"module_type": inner["module_type"],
                                    "module_args": _normalize_module_args(inner.get("module_args") or {}),
                                    "inner": inner.get("inner")}, where + "inner ", problems)
     elif node.get("inner") is not None:
-        problems.append(f"{where}'inner' is only used by module_type 'subset' (ignored)")
+        problems.append(f"{where}'inner' is only used by module_type {' / '.join(_INNER_OPS)} (ignored)")
     return op
 
 
@@ -208,6 +232,8 @@ def _build_op(op: Dict[str, Any]) -> nn.Module:
     if op["module_type"] == "subset":
         a = op["module_args"]
         return factory(_build_op(op["inner"]), percentage=a["percentage"], seed=a["seed"], dim=a["dim"])
+    if op["module_type"] in _INNER_OPS:
+        return factory(_build_op(op["inner"]), **op["module_args"])
     return factory(**op["module_args"])
 
 
@@ -1449,22 +1475,40 @@ class ApplyBendsFromJSON:
         report: Dict[str, Any] = {"placeholders": {k: values[k] for k in used}} if used else {}
         if clamp != "none":
             report["clamp"] = clamp
+        attention_items = json.loads(bends_json).get("attention_bends")
         resolved: List[Dict[str, Any]] = []
-        (patched,) = apply_bends_to_model(
-            model, bends,
-            steps_min=steps_min,
-            steps_max=steps_max,
-            max_denoising_steps=max_denoising_steps,
-            selected_part=selected_part,
-            strict=strict,
-            report=report,
-            clamp=clamp,
-            safe_ranges=ranges,
-            problems=problems,
-            resolved=resolved,
-        )
+        patched = model
+        if bends or not attention_items:
+            (patched,) = apply_bends_to_model(
+                model, bends,
+                steps_min=steps_min,
+                steps_max=steps_max,
+                max_denoising_steps=max_denoising_steps,
+                selected_part=selected_part,
+                strict=strict,
+                report=report,
+                clamp=clamp,
+                safe_ranges=ranges,
+                problems=problems,
+                resolved=resolved,
+            )
         canonical = {"version": BENDS_JSON_VERSION, "bends": resolved, "steps_min": steps_min, "steps_max": steps_max,
                      "max_denoising_steps": max_denoising_steps, "selected_part": selected_part}
+        if attention_items is not None:
+            # Experimental: attention map bends for video DiTs (attention_bending.py).
+            from .attention_bending import apply_attention_bends_json
+            attention_problems: List[str] = []
+            attention_resolved: List[Dict[str, Any]] = []
+            patched = apply_attention_bends_json(
+                patched, attention_items, lambda node, where: _clamp_op(_resolve_op(node, where, attention_problems),
+                                                                        "attention", clamp, ranges, report),
+                _build_op, attention_problems, attention_resolved, strict=strict)
+            for p in attention_problems:
+                warn(p)
+            if attention_problems:
+                report["warnings"] = report.get("warnings", []) + attention_problems
+            report["attention_bends"] = attention_resolved
+            canonical["attention_bends"] = attention_resolved
         canonical = {k: v for k, v in canonical.items() if v is not None}
         return (patched, json.dumps(report, indent=2), json.dumps(canonical, indent=2))
 
@@ -1485,3 +1529,4 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ApplyBendsFromJSON": "Apply Bends from JSON",
 }
 NODE_DISPLAY_NAME_MAPPINGS.update(probe_nodes.NODE_DISPLAY_NAME_MAPPINGS)
+NODE_DISPLAY_NAME_MAPPINGS.update(model_bending_nodes.NODE_DISPLAY_NAME_MAPPINGS)

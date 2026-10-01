@@ -25,6 +25,7 @@ from .bendutils import (
 
 STAT_NAMES = ("mean", "std", "rms", "absmax", "nonfinite", "dead_frac")
 DEFAULT_UNET_SITES = "input_blocks.*.0, middle_block.1, output_blocks.*.0"
+SPATIAL_MAX_ELEMENTS = 1 << 23  # per sample, per site and step (16 MB in fp16)
 _DIT_BLOCK_LISTS = ("double_blocks", "joint_blocks", "transformer_blocks", "blocks", "layers", "single_blocks")
 
 
@@ -135,6 +136,7 @@ class ProbeHandle:
 
     def _reset(self, signature):
         self.signature = signature
+        self.spatial_skipped = set()
         self.records: Dict[str, Dict[int, dict]] = {}
         self.last_step = -1
         self.sigmas = None
@@ -179,7 +181,16 @@ class ProbeHandle:
         if self.keep_channel:
             rec["chan"] = xs.mean(dim=other)
         if self.keep_spatial:
-            rec["spatial"] = xs.mean(dim=0).to("cpu", torch.float16)
+            per_sample = xs[0].numel()
+            if per_sample <= SPATIAL_MAX_ELEMENTS:
+                rec["spatial"] = xs.mean(dim=0).to("cpu", torch.float16)
+            elif site not in self.spatial_skipped:
+                # A WAN block output is ~33k tokens x 1.5-5k channels per step: keeping it for every site and step
+                # would fill system RAM. Stats and channel means are still recorded.
+                self.spatial_skipped.add(site)
+                warn("probe: %s has %d values per sample (cap %d); spatial means are not kept for it. "
+                     "Probe fewer sites, or use store='channel_means' for video models.",
+                     site, per_sample, SPATIAL_MAX_ELEMENTS)
         per[step] = rec
 
     def has_data(self) -> bool:
@@ -195,7 +206,7 @@ class ProbeHandle:
             stats[site] = torch.stack([per[s]["stats"].cpu() if s in per else nan_row for s in steps])
             if self.keep_channel and all(s in per for s in steps):
                 chans[site] = torch.stack([per[s]["chan"].cpu() for s in steps])
-            if self.keep_spatial and all(s in per for s in steps):
+            if self.keep_spatial and all(s in per and "spatial" in per[s] for s in steps):
                 spatial[site] = torch.stack([per[s]["spatial"].float() for s in steps])
         return Activations(sites, steps, stats, chans, spatial, self.sigmas, self.latent_shape)
 

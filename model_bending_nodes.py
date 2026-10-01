@@ -26,9 +26,10 @@ from .bendutils import (
     t_window_from,
     in_window,
     blend_and_guard,
-    infer_token_grid,
-    tokens_to_grid,
-    grid_to_tokens,
+    TokenLayout,
+    token_layout_for,
+    tokens_to_video,
+    bend_on_token_grid,
     warn,
     with_model_sampling,
     LOG_TAG,
@@ -47,6 +48,16 @@ from .bending_modules import (
     GradientModule,
     SobelModule,
     ApplyToRandomSubsetModule,
+    PADDING_MODES,
+    TranslateModule,
+    FlipModule,
+    GaussianBlurModule,
+    SharpenModule,
+    FRAME_CURVES,
+    FrameRampModule,
+    TemporalShiftModule,
+    TemporalBlurModule,
+    FrameReverseModule,
 )
 
 try:
@@ -73,6 +84,13 @@ def _get_unet_from_comfy_model(m) -> Optional[nn.Module]:
     if hasattr(m, "stream") and hasattr(m.stream, "unet"):
         return m.stream.unet
     return None
+
+
+def latent_downscale_ratio(m, default=8) -> int:
+    """Pixels per latent cell (8 for SD/Flux/WAN 2.1, 16 for WAN 2.2 5B), from the model's latent format."""
+    fmt = getattr(getattr(m, "model", None), "latent_format", None)
+    ratio = getattr(fmt, "spacial_downscale_ratio", None)
+    return int(ratio) if isinstance(ratio, (int, float)) and ratio > 0 else default
 
 
 def _set_unet_on_comfy_model(m, unet: nn.Module) -> None:
@@ -226,20 +244,26 @@ class IntermediateOutputNode:
             steps = sorted(captures)
             wanted = int(timestep)
             step = steps[-1] if wanted <= 0 else steps[min(len(steps) - 1, wanted - 1)]
-            combined_features = self._to_rgb_maps(captures[step], state["latent_shape"])
+            combined_features = self._to_rgb_maps(captures[step], state["latent_shape"], dm=unet,
+                                                  downscale=latent_downscale_ratio(m))
+        if final_output.ndim == 5:  # video latent (B, C, T, H, W): one image per frame
+            b, c, t, h, w = final_output.shape
+            return (final_output.permute(0, 2, 3, 4, 1).reshape(b * t, h, w, c), combined_features)
         return (final_output.permute(0, 2, 3, 1), combined_features)
 
     @staticmethod
-    def _to_rgb_maps(act, latent_shape):
-        """Channel-mean map per batch item, min-max normalised, as RGB images at the pixel resolution."""
+    def _to_rgb_maps(act, latent_shape, dm=None, downscale=8):
+        """Channel-mean map per batch item (and frame, for video), min-max normalised, as RGB images at the
+        pixel resolution."""
         if act.ndim == 3:  # (B, L, C) transformer tokens
-            grid = infer_token_grid(act.shape[1], latent_shape)
-            if grid is None:
+            layout = token_layout_for(dm, act.shape[1], latent_shape)
+            if layout is None:
                 side = int(math.isqrt(act.shape[1]))
-                grid = (1, side, act.shape[1] // max(1, side))
-            act, _ = tokens_to_grid(act, grid)
-        elif act.ndim == 5:  # (B, C, T, H, W): show the first frame
-            act = act[:, :, 0]
+                layout = TokenLayout((1, side, act.shape[1] // max(1, side)), suffix=act.shape[1] - side * (act.shape[1] // max(1, side)))
+            act, _, _ = tokens_to_video(act, layout)
+        if act.ndim == 5:  # (B, C, T, H, W): every frame, in time order
+            b, c, t, h, w = act.shape
+            act = act.permute(0, 2, 1, 3, 4).reshape(b * t, c, h, w)
         if act.ndim != 4:
             return torch.zeros((1, 64, 64, 3))
         maps = act.mean(dim=1, keepdim=True)
@@ -247,7 +271,7 @@ class IntermediateOutputNode:
         hi = maps.amax(dim=(2, 3), keepdim=True)
         maps = (maps - lo) / (hi - lo).clamp_min(1e-8)
         if latent_shape is not None and len(latent_shape) >= 4:
-            size = (int(latent_shape[-2]) * 8, int(latent_shape[-1]) * 8)
+            size = (int(latent_shape[-2]) * downscale, int(latent_shape[-1]) * downscale)
             maps = torch.nn.functional.interpolate(maps, size=size, mode="nearest")
         return maps.permute(0, 2, 3, 1).repeat(1, 1, 1, 3).clamp(0, 1)
 
@@ -902,10 +926,9 @@ class DiTBlockBending:
 
         def bend_tokens(x, which, weight, where):
             if spatial and which == "img" and x.ndim == 3:
-                grid = infer_token_grid(x.shape[1], state["latent_shape"])
-                if grid is not None:
-                    g, rest = tokens_to_grid(x, grid)
-                    y = grid_to_tokens(module(g), grid, x.shape[0], rest)
+                layout = token_layout_for(dm, x.shape[1], state["latent_shape"])
+                if layout is not None:
+                    y = bend_on_token_grid(x, module, layout)
                     return blend_and_guard(x, y, weight, flags=state["flags"])
                 warn_once(("grid", where), "could not infer the image-token grid at %s; bending tokens as a flat list", where)
             elif spatial and which == "txt":
@@ -951,6 +974,14 @@ class DiTBlockBending:
                         out["img"] = bend_tokens(out["img"], "img", weight, where)
                     if stream in ("txt", "both") and isinstance(out.get("txt"), torch.Tensor):
                         out["txt"] = bend_tokens(out["txt"], "txt", weight, where)
+                    elif stream in ("txt", "both"):
+                        # WAN-style blocks only return the image stream: the text context never changes between
+                        # blocks, it is only read through cross-attention.
+                        msg = (f"{type(dm).__name__} blocks do not output a text stream, so stream='{stream}' cannot "
+                               "bend text here; use 'Attention Map Bending' to bend how the text is attended to")
+                        if strict:
+                            raise ValueError(f"{LOG_TAG} {msg}")
+                        warn_once(("no_txt", where), msg)
                 return out
             return patch_fn
 
@@ -1117,22 +1148,145 @@ class FourierModelBending(BaseModelBending):
         return (FourierAmplifyModule(cutoff_freq=cutoff_freq, amp_factor=amp_factor),)
 
 
+_PADDING_TOOLTIP = "How areas moved in from outside the frame are filled: zeros, the nearest edge value, or a mirror"
+
+
 class RotateModelBending(BaseModelBending):
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": {"angle_degrees": ("FLOAT", {"default": 0.0, "min": -360, "max": 360, "step": 0.01})}}
+        return {"required": {"angle_degrees": ("FLOAT", {"default": 0.0, "min": -360, "max": 360, "step": 0.01})},
+                "optional": {"padding": (list(PADDING_MODES), {"default": "zeros", "tooltip": _PADDING_TOOLTIP})}}
 
-    def patch(self, angle_degrees):
-        return (RotateModule(angle_degrees=angle_degrees),)
+    def patch(self, angle_degrees, padding="zeros"):
+        return (RotateModule(angle_degrees=angle_degrees, padding=padding),)
 
 
 class ScaleModelBending(BaseModelBending):
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": {"scale_factor": ("FLOAT", {"default": 1.0, "min": -100, "max": 100})}}
+        return {"required": {"scale_factor": ("FLOAT", {"default": 1.0, "min": -100, "max": 100})},
+                "optional": {"padding": (list(PADDING_MODES), {"default": "zeros", "tooltip": _PADDING_TOOLTIP})}}
 
-    def patch(self, scale_factor):
-        return (ScaleModule(scale_factor=scale_factor),)
+    def patch(self, scale_factor, padding="zeros"):
+        return (ScaleModule(scale_factor=scale_factor, padding=padding),)
+
+
+class TranslateModelBending(BaseModelBending):
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {
+            "dx": ("FLOAT", {"default": 0.0, "min": -1.0, "max": 1.0, "step": 0.01,
+                             "tooltip": "Horizontal shift as a fraction of the width (positive = right)"}),
+            "dy": ("FLOAT", {"default": 0.0, "min": -1.0, "max": 1.0, "step": 0.01,
+                             "tooltip": "Vertical shift as a fraction of the height (positive = down)"}),
+            "padding": (list(PADDING_MODES), {"default": "border", "tooltip": _PADDING_TOOLTIP}),
+        }}
+
+    def patch(self, dx, dy, padding):
+        return (TranslateModule(dx=dx, dy=dy, padding=padding),)
+
+
+class FlipModelBending(BaseModelBending):
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {"direction": (["horizontal", "vertical", "both"], {"default": "horizontal"})}}
+
+    def patch(self, direction):
+        return (FlipModule(direction=direction),)
+
+
+class GaussianBlurModelBending(BaseModelBending):
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {"sigma": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 20.0, "step": 0.05,
+                                                 "tooltip": "Blur radius in latent cells / tokens"})}}
+
+    def patch(self, sigma):
+        return (GaussianBlurModule(sigma=sigma),)
+
+
+class SharpenModelBending(BaseModelBending):
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {
+            "amount": ("FLOAT", {"default": 1.0, "min": -10.0, "max": 10.0, "step": 0.05,
+                                 "tooltip": "Unsharp-mask strength: x + amount * (x - blur(x))"}),
+            "sigma": ("FLOAT", {"default": 1.0, "min": 0.05, "max": 20.0, "step": 0.05}),
+        }}
+
+    def patch(self, amount, sigma):
+        return (SharpenModule(amount=amount, sigma=sigma),)
+
+
+# Temporal modules (experimental: only validated on tiny random-weight video models).
+_VIDEO_CATEGORY = "model_bending/video (experimental)"
+_EXPERIMENTAL_NOTE = ("Experimental: validated only on tiny random-weight WAN models in the test suite, "
+                      "not yet on real video model weights.")
+
+
+class FrameRampModelBending(BaseModelBending):
+    CATEGORY = _VIDEO_CATEGORY
+    EXPERIMENTAL = True
+    DESCRIPTION = ("Applies a bend with a strength that changes over the video's frames (latent frames), so an "
+                   "effect can grow, fade or pulse over time. " + _EXPERIMENTAL_NOTE)
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {
+            "bending_module": ("BENDING_MODULE",),
+            "w_start": ("FLOAT", {"default": 0.0, "min": -4.0, "max": 4.0, "step": 0.01,
+                                  "tooltip": "Strength on the first frame (0 = unbent, 1 = fully bent)"}),
+            "w_end": ("FLOAT", {"default": 1.0, "min": -4.0, "max": 4.0, "step": 0.01,
+                                "tooltip": "Strength on the last frame"}),
+            "curve": (list(FRAME_CURVES), {"default": "linear", "tooltip": "'triangle' peaks in the middle frame"}),
+        }}
+
+    def patch(self, bending_module, w_start, w_end, curve):
+        return (FrameRampModule(bending_module, w_start=w_start, w_end=w_end, curve=curve),)
+
+
+class TemporalShiftModelBending(BaseModelBending):
+    CATEGORY = _VIDEO_CATEGORY
+    EXPERIMENTAL = True
+    DESCRIPTION = "Moves content forward or backward in time by whole latent frames. " + _EXPERIMENTAL_NOTE
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {
+            "frames": ("INT", {"default": 1, "min": -64, "max": 64,
+                               "tooltip": "Latent frames to shift (WAN: 1 latent frame = 4 video frames)"}),
+            "padding": (["border", "wrap", "zeros"], {"default": "border"}),
+        }}
+
+    def patch(self, frames, padding):
+        return (TemporalShiftModule(frames=frames, padding=padding),)
+
+
+class TemporalBlurModelBending(BaseModelBending):
+    CATEGORY = _VIDEO_CATEGORY
+    EXPERIMENTAL = True
+    DESCRIPTION = "Gaussian blur across latent frames: smears motion and makes content linger. " + _EXPERIMENTAL_NOTE
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {"sigma": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 16.0, "step": 0.05,
+                                                 "tooltip": "Blur radius in latent frames"})}}
+
+    def patch(self, sigma):
+        return (TemporalBlurModule(sigma=sigma),)
+
+
+class FrameReverseModelBending(BaseModelBending):
+    CATEGORY = _VIDEO_CATEGORY
+    EXPERIMENTAL = True
+    DESCRIPTION = "Reverses the order of the latent frames. " + _EXPERIMENTAL_NOTE
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {}}
+
+    def patch(self):
+        return (FrameReverseModule(),)
 
 
 class ErosionModelBending(BaseModelBending):
@@ -1401,6 +1555,14 @@ NODE_CLASS_MAPPINGS = {
     "Gradient Module (Bending)": GradientModelBending,
     "Dilation Module (Bending)": DilationModelBending,
     "Sobel Module (Bending)": SobelModelBending,
+    "Translate Module (Bending)": TranslateModelBending,
+    "Flip Module (Bending)": FlipModelBending,
+    "Gaussian Blur Module (Bending)": GaussianBlurModelBending,
+    "Sharpen Module (Bending)": SharpenModelBending,
+    "Frame Ramp (Bending)": FrameRampModelBending,
+    "Temporal Shift Module (Bending)": TemporalShiftModelBending,
+    "Temporal Blur Module (Bending)": TemporalBlurModelBending,
+    "Frame Reverse Module (Bending)": FrameReverseModelBending,
     "LoRA Bending": LoRABending,
     "LoRA Bending (list)": LoRABendingList,
     "Visualize Feature Map": IntermediateOutputNode,
@@ -1416,3 +1578,16 @@ NODE_CLASS_MAPPINGS = {
     "DiT Block Bending": DiTBlockBending,
     "Bendable Layer Catalogue": BendableLayerCatalogue,
 }
+
+# Video bending (experimental): display names say so; the keys stay stable for saved workflows.
+NODE_DISPLAY_NAME_MAPPINGS = {
+    "Frame Ramp (Bending)": "Frame Ramp (Bending, Experimental)",
+    "Temporal Shift Module (Bending)": "Temporal Shift Module (Bending, Experimental)",
+    "Temporal Blur Module (Bending)": "Temporal Blur Module (Bending, Experimental)",
+    "Frame Reverse Module (Bending)": "Frame Reverse Module (Bending, Experimental)",
+}
+
+from . import attention_bending  # noqa: E402
+
+NODE_CLASS_MAPPINGS.update(attention_bending.NODE_CLASS_MAPPINGS)
+NODE_DISPLAY_NAME_MAPPINGS.update(attention_bending.NODE_DISPLAY_NAME_MAPPINGS)

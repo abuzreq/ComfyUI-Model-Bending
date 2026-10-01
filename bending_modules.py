@@ -2,6 +2,7 @@
 # Kept in one place to avoid duplication between nodes.py and model_bending_nodes.py.
 import math
 
+import kornia.geometry.transform as KT
 import torch
 import torch.nn as nn
 from .bendutils import operations
@@ -19,6 +20,16 @@ class ApplyToRandomSubsetModule(nn.Module):
     def forward(self, x, *args, **kwargs):
         if self.percentage == 0 or self.percentage == 1.0:
             return x
+        if x.ndim == 5:
+            # Video (B, C, T, H, W): pick the subset per frame, the same subset in every frame.
+            b, c, t, h, w = x.shape
+            folded = x.permute(0, 2, 1, 3, 4).reshape(b * t, c, h, w)
+            out = self.forward(folded, *args, **kwargs)
+            return out.reshape(b, t, c, h, w).permute(0, 2, 1, 3, 4)
+        if x.ndim == 3:  # (B, L, C) tokens: treat as a 1-pixel-high image so channel/batch subsets still work
+            return self.forward(x.permute(0, 2, 1).unsqueeze(2), *args, **kwargs).squeeze(2).permute(0, 2, 1)
+        if x.ndim != 4:
+            raise ValueError(f"[model-bending] subset expects a 3-D to 5-D tensor, got ndim={x.ndim}")
 
         B, C, H, W = x.shape
         out = x.clone()
@@ -57,6 +68,9 @@ class BendingModule(nn.Module):
     step-based application (steps_to_bend / current_step).
     """
 
+    # Temporal modules receive video tensors (B, C, T, H, W) whole instead of frame by frame.
+    temporal = False
+
     def __init__(self):
         super().__init__()
 
@@ -66,12 +80,15 @@ class BendingModule(nn.Module):
                 f"[model-bending] bending expects a tensor but the hooked module returned {type(x).__name__}. "
                 "Transformer blocks that return tuples can be bent with 'DiT Block Bending'."
             )
-        if x.ndim == 5:
+        if x.ndim == 5 and not self.temporal:
             # Video tensors (B, C, T, H, W): fold time into the batch so 4-D ops act on each frame.
             b, c, t, h, w = x.shape
             folded = x.permute(0, 2, 1, 3, 4).reshape(b * t, c, h, w)
             out = self.forward(folded, *args, **kwargs)
             return out.reshape(b, t, c, out.shape[-2], out.shape[-1]).permute(0, 2, 1, 3, 4)
+
+        if x.ndim == 5:  # temporal module: sees (B, C, T, H, W) whole
+            return self.bend(x, *args, **kwargs)
 
         num_unsqueeze_added = 0
         if x.ndim == 2:
@@ -91,6 +108,9 @@ class BendingModule(nn.Module):
         else:
             output = self.bend(x, *args, **kwargs)
 
+        # Some kornia-based ops squeeze a batch of one; restore the input layout.
+        if output.shape != x.shape and output.numel() == x.numel():
+            output = output.reshape(x.shape)
         for i in range(num_unsqueeze_added):
             output = output.squeeze(0)
         return output
@@ -232,22 +252,218 @@ class ThresholdModule(BendingModule):
         return operations["threshold"](self.threshold)(x)
 
 
+PADDING_MODES = ("zeros", "border", "reflection")
+
+
+def _float_op(x, fn):
+    """Run fn in float32 (kornia/grid_sample are unreliable in fp16/bf16) and cast back."""
+    if x.dtype in (torch.float16, torch.bfloat16):
+        return fn(x.float()).to(x.dtype)
+    return fn(x)
+
+
 class RotateModule(BendingModule):
-    def __init__(self, angle_degrees=0):
+    def __init__(self, angle_degrees=0, padding="zeros"):
         super().__init__()
         self.angle_degrees = angle_degrees
+        self.padding = padding
 
     def bend(self, x, *args, **kwargs):
-        return operations["rotate_image"](self.angle_degrees)(x)
+        if self.padding == "zeros":
+            return operations["rotate_image"](self.angle_degrees)(x)
+        return _float_op(x, lambda v: KT.rotate(
+            v, torch.full((v.shape[0],), float(self.angle_degrees), device=v.device, dtype=v.dtype),
+            padding_mode=self.padding))
 
 
 class ScaleModule(BendingModule):
-    def __init__(self, scale_factor=1):
+    def __init__(self, scale_factor=1, padding="zeros"):
         super().__init__()
         self.scale_factor = scale_factor
+        self.padding = padding
 
     def bend(self, x, *args, **kwargs):
-        return operations["scale_image"](self.scale_factor)(x)
+        if self.padding == "zeros":
+            return operations["scale_image"](self.scale_factor)(x)
+        s = float(self.scale_factor)
+        return _float_op(x, lambda v: KT.scale(
+            v, torch.tensor([[s, s]], device=v.device, dtype=v.dtype).expand(v.shape[0], 2), padding_mode=self.padding))
+
+
+class TranslateModule(BendingModule):
+    """Shift by (dx, dy) as a fraction of the width/height (0.5 = half the frame); positive = right/down."""
+
+    def __init__(self, dx=0.0, dy=0.0, padding="border"):
+        super().__init__()
+        self.dx = dx
+        self.dy = dy
+        self.padding = padding
+
+    def bend(self, x, *args, **kwargs):
+        h, w = x.shape[-2:]
+        shift = [float(self.dx) * w, float(self.dy) * h]
+        return _float_op(x, lambda v: KT.translate(
+            v, torch.tensor([shift], device=v.device, dtype=v.dtype).expand(v.shape[0], 2), padding_mode=self.padding))
+
+
+class FlipModule(BendingModule):
+    def __init__(self, direction="horizontal"):
+        super().__init__()
+        self.direction = direction
+
+    def bend(self, x, *args, **kwargs):
+        dims = {"horizontal": (-1,), "vertical": (-2,), "both": (-2, -1)}[self.direction]
+        return torch.flip(x, dims)
+
+
+def _gaussian_kernel1d(sigma, device):
+    radius = max(1, int(math.ceil(3.0 * sigma)))
+    t = torch.arange(-radius, radius + 1, device=device, dtype=torch.float32)
+    k = torch.exp(-0.5 * (t / sigma) ** 2)
+    return k / k.sum(), radius
+
+
+def gaussian_blur_along(x, sigma, dim):
+    """1-D Gaussian blur of x along `dim` with edge replication (works for any size, unlike reflect padding)."""
+    if sigma <= 0 or x.shape[dim] < 2:
+        return x
+    k, radius = _gaussian_kernel1d(float(sigma), x.device)
+    xf = x.float().movedim(dim, -1)
+    shape = xf.shape
+    flat = xf.reshape(-1, 1, shape[-1])
+    flat = torch.nn.functional.pad(flat, (radius, radius), mode="replicate")
+    flat = torch.nn.functional.conv1d(flat, k.view(1, 1, -1))
+    return flat.reshape(shape).movedim(-1, dim).to(x.dtype)
+
+
+def gaussian_blur2d(x, sigma):
+    return gaussian_blur_along(gaussian_blur_along(x, sigma, -1), sigma, -2)
+
+
+class GaussianBlurModule(BendingModule):
+    """Spatial Gaussian blur (edge replication); sigma in latent/token cells."""
+
+    def __init__(self, sigma=1.0):
+        super().__init__()
+        self.sigma = sigma
+
+    def bend(self, x, *args, **kwargs):
+        return gaussian_blur2d(x, self.sigma)
+
+
+class SharpenModule(BendingModule):
+    """Unsharp mask: x + amount * (x - blur(x))."""
+
+    def __init__(self, amount=1.0, sigma=1.0):
+        super().__init__()
+        self.amount = amount
+        self.sigma = sigma
+
+    def bend(self, x, *args, **kwargs):
+        return x + float(self.amount) * (x - gaussian_blur2d(x, self.sigma))
+
+
+# ---------------------------------------------------------------------------
+# Temporal modules: act across the frames of video tensors (B, C, T, H, W).
+# A 4-D input is treated as a single frame.
+# ---------------------------------------------------------------------------
+
+def _as_video(x):
+    return (x.unsqueeze(2), True) if x.ndim == 4 else (x, False)
+
+
+FRAME_CURVES = ("linear", "ease_in", "ease_out", "smooth", "triangle")
+
+
+def frame_weights(num_frames, w_start, w_end, curve="linear"):
+    """Per-frame weights from w_start (first frame) to w_end (last frame) along a curve."""
+    if num_frames <= 1:
+        return [float(w_start)]
+    out = []
+    for i in range(num_frames):
+        u = i / (num_frames - 1)
+        if curve == "ease_in":
+            u = u * u
+        elif curve == "ease_out":
+            u = 1 - (1 - u) * (1 - u)
+        elif curve == "smooth":
+            u = 0.5 - 0.5 * math.cos(math.pi * u)
+        elif curve == "triangle":
+            u = 1 - abs(2 * u - 1)
+        out.append(float(w_start) + (float(w_end) - float(w_start)) * u)
+    return out
+
+
+class FrameRampModule(BendingModule):
+    """
+    Applies an inner bend with a strength that varies over the frames: frame f becomes
+    x_f + w(f) * (bend(x_f) - x_f), with w going from w_start to w_end along `curve`
+    ('triangle' peaks in the middle). Works with any inner op, so effects can grow, fade or pulse over time.
+    """
+    temporal = True
+
+    def __init__(self, module, w_start=0.0, w_end=1.0, curve="linear"):
+        super().__init__()
+        self.module = module
+        self.w_start = w_start
+        self.w_end = w_end
+        self.curve = curve
+
+    def bend(self, x, *args, **kwargs):
+        v, was_image = _as_video(x)
+        bent = self.module(v, *args, **kwargs)
+        w = torch.tensor(frame_weights(v.shape[2], self.w_start, self.w_end, self.curve),
+                         device=v.device, dtype=torch.float32).view(1, 1, -1, 1, 1)
+        out = (v.float() + w * (bent.float() - v.float())).to(v.dtype)
+        return out.squeeze(2) if was_image else out
+
+
+class TemporalShiftModule(BendingModule):
+    """Moves content `frames` frames later in time (negative = earlier). 'border' repeats the edge frame,
+    'wrap' rolls around, 'zeros' fills with zeros."""
+    temporal = True
+
+    def __init__(self, frames=1, padding="border"):
+        super().__init__()
+        self.frames = frames
+        self.padding = padding
+
+    def bend(self, x, *args, **kwargs):
+        v, was_image = _as_video(x)
+        n, t = int(self.frames), v.shape[2]
+        if n == 0 or t < 2:
+            return x
+        if self.padding == "wrap":
+            out = torch.roll(v, shifts=n, dims=2)
+        else:
+            idx = torch.arange(t, device=v.device) - n
+            valid = (idx >= 0) & (idx < t)
+            out = v.index_select(2, idx.clamp(0, t - 1))
+            if self.padding == "zeros":
+                out = out * valid.view(1, 1, -1, 1, 1).to(out.dtype)
+        return out.squeeze(2) if was_image else out
+
+
+class TemporalBlurModule(BendingModule):
+    """Gaussian blur along time (sigma in latent frames); smears motion and makes content linger."""
+    temporal = True
+
+    def __init__(self, sigma=1.0):
+        super().__init__()
+        self.sigma = sigma
+
+    def bend(self, x, *args, **kwargs):
+        if x.ndim != 5:
+            return x
+        return gaussian_blur_along(x, self.sigma, 2)
+
+
+class FrameReverseModule(BendingModule):
+    """Reverses the order of the frames."""
+    temporal = True
+
+    def bend(self, x, *args, **kwargs):
+        return torch.flip(x, (2,)) if x.ndim == 5 else x
 
 
 class ErosionModule(BendingModule):

@@ -9,6 +9,7 @@ import torch
 import torch.nn as nn
 import scipy.linalg
 import random
+from typing import NamedTuple
 from kornia import morphology, filters
 import kornia.geometry.transform as KT
 from comfy.model_base import BaseModel
@@ -169,9 +170,17 @@ def inject_module(model: nn.Module, layer_path: str, new_module: nn.Module):
     print("Updated Model Part", parent)
 
 
+def _all_subclasses(cls):
+    out = []
+    for sub in cls.__subclasses__():
+        out.append(sub)
+        out.extend(_all_subclasses(sub))
+    return out
+
+
 def process_path(path, extra_skips=[]):
-    subclasses = ['BaseModel'] + \
-        [c.__name__.split('.')[-1] for c in BaseModel.__subclasses__()]
+    # All BaseModel subclasses, not only direct ones: WAN22, WAN21_Vace, WAN21_Camera, ... subclass WAN21.
+    subclasses = ['BaseModel'] + [c.__name__.split('.')[-1] for c in _all_subclasses(BaseModel)]
     skips = ["diffusion_model", "UNet2DConditionModel", "Flux", "Flux2", ]
     skips += extra_skips
     # clean up loose dots at start or end
@@ -1340,6 +1349,10 @@ def make_bends_wrapper(unet: nn.Module, specs, prev_wrapper=None, strict: bool =
     needs_t = any(s.t_window is not None or _is_gated(s.module) for s, _ in resolved)
     warned = set()
     ever_fired = set()
+    # Video DiTs (WAN): (B, L, C) token outputs are laid out on their (frames, h, w) grid, so spatial ops act
+    # on the picture rather than on the token-by-channel matrix. Image DiTs keep the historical behaviour.
+    video_dit = is_video_dit(unet)
+    pass_state = {"latent_shape": None}
 
     def warn_once(key, msg, *args):
         if key not in warned:
@@ -1348,6 +1361,11 @@ def make_bends_wrapper(unet: nn.Module, specs, prev_wrapper=None, strict: bool =
 
     def make_hook(path, module, weight, guard, flags):
         def bend(x, args, kwargs):
+            if video_dit and x.ndim == 3:
+                layout = token_layout_for(unet, x.shape[1], pass_state["latent_shape"], allow_extra=False)
+                if layout is not None:
+                    y = bend_on_token_grid(x, lambda v: module(v, *args, **kwargs), layout)
+                    return blend_and_guard(x, y, weight, guard=guard, flags=flags)
             return blend_and_guard(x, module(x, *args, **kwargs), weight, guard=guard, flags=flags)
 
         def _hook(mod, args, kwargs, output):
@@ -1372,6 +1390,7 @@ def make_bends_wrapper(unet: nn.Module, specs, prev_wrapper=None, strict: bool =
         c = params["c"] or {}
         transformer_options = c.get("transformer_options", {})
         step = current_step(transformer_options)
+        pass_state["latent_shape"] = tuple(params["input"].shape) if isinstance(params.get("input"), torch.Tensor) else None
         t = normalized_t(model_sampling_of(apply_model), params["timestep"]) if needs_t else None
         if needs_t and t is None:
             # Fail closed: a bend that must follow diffusion time is skipped rather than applied at every step.
@@ -1459,15 +1478,17 @@ def infer_token_grid(num_tokens, latent_shape):
     H, W = int(latent_shape[-2]), int(latent_shape[-1])
     T = int(latent_shape[2]) if len(latent_shape) == 5 else 1
     best = None
-    for p in (1, 2, 4, 8, 16, 32, 64):
-        h, w = -(-H // p), -(-W // p)
-        for tp in ((1,) if T == 1 else (1, 2, 4)):
-            f = -(-T // tp)
-            n = f * h * w
-            if n == num_tokens:
-                return (f, h, w)
-            if n < num_tokens and (best is None or n > best[0] * best[1] * best[2]):
-                best = (f, h, w)
+    # Video DiTs (WAN, HunyuanVideo) patchify 1x2x2: try that first, otherwise p=1, tp=4 gives the same token
+    # count whenever T % 4 == 0 and wins with the wrong grid.
+    patches = ((2, 1),) if T > 1 else ()
+    patches += tuple((p, tp) for p in (1, 2, 4, 8, 16, 32, 64) for tp in ((1,) if T == 1 else (1, 2, 4)))
+    for p, tp in patches:
+        f, h, w = -(-T // tp), -(-H // p), -(-W // p)
+        n = f * h * w
+        if n == num_tokens:
+            return (f, h, w)
+        if n < num_tokens and (best is None or n > best[0] * best[1] * best[2]):
+            best = (f, h, w)
     return best
 
 
@@ -1486,6 +1507,108 @@ def grid_to_tokens(y, grid, batch, rest=None):
     c = y.shape[1]
     y = y.reshape(batch, f, c, h, w).permute(0, 1, 3, 4, 2).reshape(batch, f * h * w, c)
     return torch.cat((y, rest), dim=1) if rest is not None else y
+
+
+class TokenLayout(NamedTuple):
+    """Where the image tokens of a (B, L, C) DiT activation sit: `prefix` extra tokens, then the
+    frame-major, row-major (frames, h, w) grid, then `suffix` extra tokens."""
+    grid: tuple
+    prefix: int = 0
+    suffix: int = 0
+
+    @property
+    def num_image_tokens(self):
+        return self.grid[0] * self.grid[1] * self.grid[2]
+
+
+def dit_patch_size(dm):
+    """(pt, ph, pw) patch size of a DiT, or None. WAN/HunyuanVideo store a 3-tuple, Flux/SD3 an int."""
+    p = getattr(dm, "patch_size", None)
+    if isinstance(p, int) and p > 0:
+        return (1, p, p)
+    if isinstance(p, (tuple, list)) and all(isinstance(v, int) and v > 0 for v in p):
+        if len(p) == 3:
+            return tuple(p)
+        if len(p) == 2:
+            return (1, p[0], p[1])
+    return None
+
+
+def is_video_dit(dm):
+    p = getattr(dm, "patch_size", None)
+    return isinstance(p, (tuple, list)) and len(p) == 3 and dit_patch_size(dm) is not None
+
+
+def _prepends_extra_tokens(dm):
+    # WAN's reference-latent tokens (ref_conv) are concatenated in front of the video tokens.
+    return getattr(dm, "ref_conv", None) is not None
+
+
+def token_layout_for(dm, num_tokens, latent_shape, allow_extra=True):
+    """
+    TokenLayout for a (B, num_tokens, C) activation of diffusion model `dm`, given the latent shape the
+    model_function_wrapper saw. With a known patch size the grid is computed exactly, as the model's own
+    pad_to_patch_size does (ceil); otherwise it is guessed with infer_token_grid. Extra tokens are prepended
+    for models with reference tokens in front (WAN ref_conv) and appended otherwise (Kontext, S2V).
+    allow_extra=False only accepts an exact match (for generic hooks, which may see text-token tensors too).
+    Returns None when no grid fits.
+    """
+    if latent_shape is None or len(latent_shape) < 4 or num_tokens <= 0:
+        return None
+    patch = dit_patch_size(dm) if dm is not None else None
+    if patch is not None:
+        pt, ph, pw = patch
+        T = int(latent_shape[2]) if len(latent_shape) == 5 else 1
+        H, W = int(latent_shape[-2]), int(latent_shape[-1])
+        f, h, w = -(-T // pt), -(-H // ph), -(-W // pw)
+        n = f * h * w
+        if n == num_tokens:
+            return TokenLayout((f, h, w))
+        if n < num_tokens and allow_extra:
+            extra = num_tokens - n
+            if _prepends_extra_tokens(dm):
+                return TokenLayout((f, h, w), prefix=extra)
+            return TokenLayout((f, h, w), suffix=extra)
+        if n < num_tokens and _prepends_extra_tokens(dm) and (num_tokens - n) % (h * w) == 0:
+            return TokenLayout((f, h, w), prefix=num_tokens - n)
+        return None
+    grid = infer_token_grid(num_tokens, latent_shape)
+    if grid is None:
+        return None
+    n = grid[0] * grid[1] * grid[2]
+    if n != num_tokens and not allow_extra:
+        return None
+    return TokenLayout(tuple(grid), suffix=num_tokens - n)
+
+
+def tokens_to_video(x, layout):
+    """(B, L, C) -> ((B, C, F, h, w), prefix tokens or None, suffix tokens or None)."""
+    f, h, w = layout.grid
+    n = f * h * w
+    b, _, c = x.shape
+    p = layout.prefix
+    pre = x[:, :p] if p else None
+    post = x[:, p + n:] if x.shape[1] > p + n else None
+    v = x[:, p:p + n].reshape(b, f, h, w, c).permute(0, 4, 1, 2, 3)
+    return v, pre, post
+
+
+def video_to_tokens(v, pre=None, post=None):
+    """Inverse of tokens_to_video."""
+    b, c, f, h, w = v.shape
+    y = v.permute(0, 2, 3, 4, 1).reshape(b, f * h * w, c)
+    parts = [t for t in (pre, y, post) if t is not None]
+    return torch.cat(parts, dim=1) if len(parts) > 1 else y
+
+
+def bend_on_token_grid(x, fn, layout):
+    """Apply fn to the image tokens of x laid out as a (B, C, F, h, w) video; extra tokens pass through."""
+    v, pre, post = tokens_to_video(x, layout)
+    y = fn(v)
+    if not isinstance(y, torch.Tensor) or y.shape != v.shape:
+        raise ValueError(f"{LOG_TAG} a bend on the token grid must keep its shape {tuple(v.shape)}, "
+                         f"got {tuple(y.shape) if isinstance(y, torch.Tensor) else type(y).__name__}")
+    return video_to_tokens(y.to(x.dtype), pre, post)
 
 
 def parse_step_str_to_ranges(s, max_steps=1000):

@@ -29,7 +29,24 @@ This project provides:
 6. **Feature map visualization** — **Visualize Feature Map** shows features at a given layer by averaging over channels into image-like tensors.
 [Source](https://ravivaishnav20.medium.com/visualizing-feature-maps-using-pytorch-12a48cd1e573)
 [[Workflow](workflows/feature_map_viz.json)]
+8. <mark>EXPERIMENTAL</mark> **Video model bending (WAN 2.1 / 2.2)** — see below.
 
+## Experimental: video model bending (WAN 2.1 / 2.2)
+> Marked **Experimental** in ComfyUI: tested on tiny random-weight WAN models (`tests/test_video.py`), not yet on real WAN weights. Please report what you see.
+
+**Attention Map Bending** bends the cross-attention maps between the video and the prompt (or the CLIP image in WAN 2.1 I2V) frame by frame, with any bending module. It can also bend self-attention: where each position's result lands (`self_query`) or where it reads from (`self_key`). You can target blocks, prompt tokens or words, heads, latent frames, steps and CFG passes. **Attention Map Capture** and **Read Attention Maps** render where chosen words are attended to, as video. **Frame Ramp**, **Temporal Shift**, **Temporal Blur** and **Frame Reverse** bend over time.
+
+Tips: the middle blocks (13–18 of 30 in WAN 2.1 1.3B, ~17–24 of 40 in 14B) and the early steps change the most; `tokens: all` is much stronger than a single word; keep scales small (~1.04); amplify (Multiply Scalar) needs `renormalize: none`. WAN 2.2 14B has two models: bend each separately (the high-noise one for layout). Cross-attention bending computes the map explicitly, so bend a few blocks and steps at high resolution.
+
+Workflows ([workflows/video/](workflows/video/), with model download links in each):
+[attention bending](workflows/video/wan21_t2v_attention_bending.json) ·
+[attention capture](workflows/video/wan21_t2v_attention_capture.json) ·
+[texture ops](workflows/video/wan21_t2v_texture_ops.json) ·
+[temporal bending](workflows/video/wan21_t2v_temporal_bending.json) ·
+[self-attention](workflows/video/wan21_t2v_self_attention_bending.json) ·
+[DiT blocks / layers](workflows/video/wan21_t2v_dit_block_bending.json) ·
+[image-to-video](workflows/video/wan21_i2v_attention_bending.json) ·
+[WAN 2.2 14B](workflows/video/wan22_t2v_14b_attention_bending.json)
 
 ## Quickstart
 1. Install [ComfyUI](https://docs.comfy.org/get_started).

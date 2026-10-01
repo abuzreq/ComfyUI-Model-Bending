@@ -1,0 +1,1519 @@
+{
+ "last_node_id": 27,
+ "last_link_id": 38,
+ "nodes": [
+  {
+   "id": 1,
+   "type": "UNETLoader",
+   "pos": [
+    60,
+    260
+   ],
+   "size": [
+    340,
+    114
+   ],
+   "flags": {},
+   "order": 0,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "localized_name": "MODEL",
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      1
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "UNETLoader"
+   },
+   "widgets_values": [
+    "wan2.1_t2v_1.3B_fp16.safetensors",
+    "default"
+   ]
+  },
+  {
+   "id": 2,
+   "type": "CLIPLoader",
+   "pos": [
+    60,
+    424
+   ],
+   "size": [
+    340,
+    140
+   ],
+   "flags": {},
+   "order": 1,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "localized_name": "CLIP",
+     "name": "CLIP",
+     "type": "CLIP",
+     "links": [
+      2,
+      3
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "CLIPLoader"
+   },
+   "widgets_values": [
+    "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+    "wan",
+    "default"
+   ]
+  },
+  {
+   "id": 3,
+   "type": "VAELoader",
+   "pos": [
+    60,
+    614
+   ],
+   "size": [
+    340,
+    88
+   ],
+   "flags": {},
+   "order": 2,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "localized_name": "VAE",
+     "name": "VAE",
+     "type": "VAE",
+     "links": [
+      9,
+      19,
+      28,
+      37
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "VAELoader"
+   },
+   "widgets_values": [
+    "wan_2.1_vae.safetensors"
+   ]
+  },
+  {
+   "id": 4,
+   "type": "ModelSamplingSD3",
+   "pos": [
+    460,
+    260
+   ],
+   "size": [
+    340,
+    88
+   ],
+   "flags": {},
+   "order": 7,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "model",
+     "name": "model",
+     "type": "MODEL",
+     "link": 1
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "MODEL",
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      4,
+      12,
+      21,
+      30
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "ModelSamplingSD3"
+   },
+   "widgets_values": [
+    8.0
+   ]
+  },
+  {
+   "id": 5,
+   "type": "CLIPTextEncode",
+   "pos": [
+    460,
+    398
+   ],
+   "size": [
+    340,
+    178
+   ],
+   "flags": {},
+   "order": 8,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "clip",
+     "name": "clip",
+     "type": "CLIP",
+     "link": 2
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "CONDITIONING",
+     "name": "CONDITIONING",
+     "type": "CONDITIONING",
+     "links": [
+      5,
+      15,
+      24,
+      33
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "CLIPTextEncode"
+   },
+   "widgets_values": [
+    "A white horse gallops along a beach at sunset, waves crashing around its legs, cinematic, golden light"
+   ],
+   "title": "Positive prompt"
+  },
+  {
+   "id": 6,
+   "type": "CLIPTextEncode",
+   "pos": [
+    460,
+    626
+   ],
+   "size": [
+    340,
+    178
+   ],
+   "flags": {},
+   "order": 9,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "clip",
+     "name": "clip",
+     "type": "CLIP",
+     "link": 3
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "CONDITIONING",
+     "name": "CONDITIONING",
+     "type": "CONDITIONING",
+     "links": [
+      6,
+      16,
+      25,
+      34
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "CLIPTextEncode"
+   },
+   "widgets_values": [
+    "blurry, low quality, static, distorted, deformed, watermark, text, subtitles"
+   ],
+   "title": "Negative prompt"
+  },
+  {
+   "id": 7,
+   "type": "EmptyHunyuanLatentVideo",
+   "pos": [
+    60,
+    752
+   ],
+   "size": [
+    340,
+    166
+   ],
+   "flags": {},
+   "order": 3,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "localized_name": "LATENT",
+     "name": "LATENT",
+     "type": "LATENT",
+     "links": [
+      7,
+      17,
+      26,
+      35
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "EmptyHunyuanLatentVideo"
+   },
+   "widgets_values": [
+    640,
+    368,
+    25,
+    1
+   ]
+  },
+  {
+   "id": 8,
+   "type": "KSampler",
+   "pos": [
+    860,
+    260
+   ],
+   "size": [
+    340,
+    310
+   ],
+   "flags": {},
+   "order": 11,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "model",
+     "name": "model",
+     "type": "MODEL",
+     "link": 4
+    },
+    {
+     "localized_name": "positive",
+     "name": "positive",
+     "type": "CONDITIONING",
+     "link": 5
+    },
+    {
+     "localized_name": "negative",
+     "name": "negative",
+     "type": "CONDITIONING",
+     "link": 6
+    },
+    {
+     "localized_name": "latent_image",
+     "name": "latent_image",
+     "type": "LATENT",
+     "link": 7
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "LATENT",
+     "name": "LATENT",
+     "type": "LATENT",
+     "links": [
+      8
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KSampler"
+   },
+   "widgets_values": [
+    42,
+    "fixed",
+    10,
+    6.5,
+    "uni_pc",
+    "simple",
+    1.0
+   ],
+   "title": "Sampler: baseline"
+  },
+  {
+   "id": 9,
+   "type": "VAEDecode",
+   "pos": [
+    1260,
+    260
+   ],
+   "size": [
+    340,
+    84
+   ],
+   "flags": {},
+   "order": 15,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "samples",
+     "name": "samples",
+     "type": "LATENT",
+     "link": 8
+    },
+    {
+     "localized_name": "vae",
+     "name": "vae",
+     "type": "VAE",
+     "link": 9
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "IMAGE",
+     "name": "IMAGE",
+     "type": "IMAGE",
+     "links": [
+      10
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "VAEDecode"
+   },
+   "widgets_values": []
+  },
+  {
+   "id": 10,
+   "type": "SaveAnimatedWEBP",
+   "pos": [
+    1660,
+    260
+   ],
+   "size": [
+    340,
+    192
+   ],
+   "flags": {},
+   "order": 19,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "images",
+     "name": "images",
+     "type": "IMAGE",
+     "link": 10
+    }
+   ],
+   "outputs": [],
+   "properties": {
+    "Node name for S&R": "SaveAnimatedWEBP"
+   },
+   "widgets_values": [
+    "wan_bending/baseline",
+    16.0,
+    false,
+    90,
+    "default"
+   ],
+   "title": "Save: baseline"
+  },
+  {
+   "id": 11,
+   "type": "Rotate Module (Bending)",
+   "pos": [
+    60,
+    968
+   ],
+   "size": [
+    340,
+    114
+   ],
+   "flags": {},
+   "order": 4,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "localized_name": "BENDING_MODULE",
+     "name": "BENDING_MODULE",
+     "type": "BENDING_MODULE",
+     "links": [
+      11
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "Rotate Module (Bending)"
+   },
+   "widgets_values": [
+    30.0,
+    "border"
+   ]
+  },
+  {
+   "id": 12,
+   "type": "Frame Ramp (Bending)",
+   "pos": [
+    460,
+    854
+   ],
+   "size": [
+    340,
+    140
+   ],
+   "flags": {},
+   "order": 10,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "bending_module",
+     "name": "bending_module",
+     "type": "BENDING_MODULE",
+     "link": 11
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "BENDING_MODULE",
+     "name": "BENDING_MODULE",
+     "type": "BENDING_MODULE",
+     "links": [
+      13
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "Frame Ramp (Bending)"
+   },
+   "widgets_values": [
+    0.0,
+    1.0,
+    "smooth"
+   ]
+  },
+  {
+   "id": 13,
+   "type": "Attention Map Bending",
+   "pos": [
+    860,
+    620
+   ],
+   "size": [
+    340,
+    534
+   ],
+   "flags": {},
+   "order": 12,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "model",
+     "name": "model",
+     "type": "MODEL",
+     "link": 12
+    },
+    {
+     "localized_name": "bending_module",
+     "name": "bending_module",
+     "type": "BENDING_MODULE",
+     "link": 13
+    },
+    {
+     "localized_name": "clip",
+     "name": "clip",
+     "type": "CLIP",
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "MODEL",
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      14
+     ]
+    },
+    {
+     "localized_name": "report",
+     "name": "report",
+     "type": "STRING",
+     "links": []
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "Attention Map Bending"
+   },
+   "widgets_values": [
+    "cross_text",
+    "13-18",
+    "all",
+    "keys",
+    "both",
+    "0-4",
+    1.0,
+    0.0,
+    "*",
+    "*",
+    1.0,
+    "",
+    false
+   ],
+   "title": "Rotation growing over time"
+  },
+  {
+   "id": 14,
+   "type": "KSampler",
+   "pos": [
+    1260,
+    394
+   ],
+   "size": [
+    340,
+    310
+   ],
+   "flags": {},
+   "order": 16,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "model",
+     "name": "model",
+     "type": "MODEL",
+     "link": 14
+    },
+    {
+     "localized_name": "positive",
+     "name": "positive",
+     "type": "CONDITIONING",
+     "link": 15
+    },
+    {
+     "localized_name": "negative",
+     "name": "negative",
+     "type": "CONDITIONING",
+     "link": 16
+    },
+    {
+     "localized_name": "latent_image",
+     "name": "latent_image",
+     "type": "LATENT",
+     "link": 17
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "LATENT",
+     "name": "LATENT",
+     "type": "LATENT",
+     "links": [
+      18
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KSampler"
+   },
+   "widgets_values": [
+    42,
+    "fixed",
+    10,
+    6.5,
+    "uni_pc",
+    "simple",
+    1.0
+   ],
+   "title": "Sampler: rotate_ramp_over_frames"
+  },
+  {
+   "id": 15,
+   "type": "VAEDecode",
+   "pos": [
+    1660,
+    502
+   ],
+   "size": [
+    340,
+    84
+   ],
+   "flags": {},
+   "order": 20,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "samples",
+     "name": "samples",
+     "type": "LATENT",
+     "link": 18
+    },
+    {
+     "localized_name": "vae",
+     "name": "vae",
+     "type": "VAE",
+     "link": 19
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "IMAGE",
+     "name": "IMAGE",
+     "type": "IMAGE",
+     "links": [
+      20
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "VAEDecode"
+   },
+   "widgets_values": []
+  },
+  {
+   "id": 16,
+   "type": "SaveAnimatedWEBP",
+   "pos": [
+    2060,
+    260
+   ],
+   "size": [
+    340,
+    192
+   ],
+   "flags": {},
+   "order": 23,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "images",
+     "name": "images",
+     "type": "IMAGE",
+     "link": 20
+    }
+   ],
+   "outputs": [],
+   "properties": {
+    "Node name for S&R": "SaveAnimatedWEBP"
+   },
+   "widgets_values": [
+    "wan_bending/rotate_ramp_over_frames",
+    16.0,
+    false,
+    90,
+    "default"
+   ],
+   "title": "Save: rotate_ramp_over_frames"
+  },
+  {
+   "id": 17,
+   "type": "Temporal Shift Module (Bending)",
+   "pos": [
+    60,
+    1132
+   ],
+   "size": [
+    340,
+    114
+   ],
+   "flags": {},
+   "order": 5,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "localized_name": "BENDING_MODULE",
+     "name": "BENDING_MODULE",
+     "type": "BENDING_MODULE",
+     "links": [
+      22
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "Temporal Shift Module (Bending)"
+   },
+   "widgets_values": [
+    2,
+    "border"
+   ]
+  },
+  {
+   "id": 18,
+   "type": "DiT Block Bending",
+   "pos": [
+    860,
+    1204
+   ],
+   "size": [
+    340,
+    240
+   ],
+   "flags": {},
+   "order": 13,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "model",
+     "name": "model",
+     "type": "MODEL",
+     "link": 21
+    },
+    {
+     "localized_name": "bending_module",
+     "name": "bending_module",
+     "type": "BENDING_MODULE",
+     "link": 22
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "MODEL",
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      23
+     ]
+    },
+    {
+     "localized_name": "report",
+     "name": "report",
+     "type": "STRING",
+     "links": []
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "DiT Block Bending"
+   },
+   "widgets_values": [
+    "double:10-20",
+    "img",
+    true,
+    1.0,
+    0.5,
+    false
+   ]
+  },
+  {
+   "id": 19,
+   "type": "KSampler",
+   "pos": [
+    1260,
+    754
+   ],
+   "size": [
+    340,
+    310
+   ],
+   "flags": {},
+   "order": 17,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "model",
+     "name": "model",
+     "type": "MODEL",
+     "link": 23
+    },
+    {
+     "localized_name": "positive",
+     "name": "positive",
+     "type": "CONDITIONING",
+     "link": 24
+    },
+    {
+     "localized_name": "negative",
+     "name": "negative",
+     "type": "CONDITIONING",
+     "link": 25
+    },
+    {
+     "localized_name": "latent_image",
+     "name": "latent_image",
+     "type": "LATENT",
+     "link": 26
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "LATENT",
+     "name": "LATENT",
+     "type": "LATENT",
+     "links": [
+      27
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KSampler"
+   },
+   "widgets_values": [
+    42,
+    "fixed",
+    10,
+    6.5,
+    "uni_pc",
+    "simple",
+    1.0
+   ],
+   "title": "Sampler: temporal_shift_blocks_10-20"
+  },
+  {
+   "id": 20,
+   "type": "VAEDecode",
+   "pos": [
+    1660,
+    636
+   ],
+   "size": [
+    340,
+    84
+   ],
+   "flags": {},
+   "order": 21,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "samples",
+     "name": "samples",
+     "type": "LATENT",
+     "link": 27
+    },
+    {
+     "localized_name": "vae",
+     "name": "vae",
+     "type": "VAE",
+     "link": 28
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "IMAGE",
+     "name": "IMAGE",
+     "type": "IMAGE",
+     "links": [
+      29
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "VAEDecode"
+   },
+   "widgets_values": []
+  },
+  {
+   "id": 21,
+   "type": "SaveAnimatedWEBP",
+   "pos": [
+    2060,
+    502
+   ],
+   "size": [
+    340,
+    192
+   ],
+   "flags": {},
+   "order": 24,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "images",
+     "name": "images",
+     "type": "IMAGE",
+     "link": 29
+    }
+   ],
+   "outputs": [],
+   "properties": {
+    "Node name for S&R": "SaveAnimatedWEBP"
+   },
+   "widgets_values": [
+    "wan_bending/temporal_shift_blocks_10-20",
+    16.0,
+    false,
+    90,
+    "default"
+   ],
+   "title": "Save: temporal_shift_blocks_10-20"
+  },
+  {
+   "id": 22,
+   "type": "Temporal Blur Module (Bending)",
+   "pos": [
+    60,
+    1296
+   ],
+   "size": [
+    340,
+    88
+   ],
+   "flags": {},
+   "order": 6,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "localized_name": "BENDING_MODULE",
+     "name": "BENDING_MODULE",
+     "type": "BENDING_MODULE",
+     "links": [
+      31
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "Temporal Blur Module (Bending)"
+   },
+   "widgets_values": [
+    1.5
+   ]
+  },
+  {
+   "id": 23,
+   "type": "Attention Map Bending",
+   "pos": [
+    860,
+    1494
+   ],
+   "size": [
+    340,
+    534
+   ],
+   "flags": {},
+   "order": 14,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "model",
+     "name": "model",
+     "type": "MODEL",
+     "link": 30
+    },
+    {
+     "localized_name": "bending_module",
+     "name": "bending_module",
+     "type": "BENDING_MODULE",
+     "link": 31
+    },
+    {
+     "localized_name": "clip",
+     "name": "clip",
+     "type": "CLIP",
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "MODEL",
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      32
+     ]
+    },
+    {
+     "localized_name": "report",
+     "name": "report",
+     "type": "STRING",
+     "links": []
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "Attention Map Bending"
+   },
+   "widgets_values": [
+    "self_query",
+    "10-20",
+    "all",
+    "none",
+    "both",
+    "0-4",
+    1.0,
+    0.0,
+    "*",
+    "*",
+    1.0,
+    "",
+    false
+   ],
+   "title": "Self-attention smeared in time"
+  },
+  {
+   "id": 24,
+   "type": "KSampler",
+   "pos": [
+    1260,
+    1114
+   ],
+   "size": [
+    340,
+    310
+   ],
+   "flags": {},
+   "order": 18,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "model",
+     "name": "model",
+     "type": "MODEL",
+     "link": 32
+    },
+    {
+     "localized_name": "positive",
+     "name": "positive",
+     "type": "CONDITIONING",
+     "link": 33
+    },
+    {
+     "localized_name": "negative",
+     "name": "negative",
+     "type": "CONDITIONING",
+     "link": 34
+    },
+    {
+     "localized_name": "latent_image",
+     "name": "latent_image",
+     "type": "LATENT",
+     "link": 35
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "LATENT",
+     "name": "LATENT",
+     "type": "LATENT",
+     "links": [
+      36
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KSampler"
+   },
+   "widgets_values": [
+    42,
+    "fixed",
+    10,
+    6.5,
+    "uni_pc",
+    "simple",
+    1.0
+   ],
+   "title": "Sampler: self_attention_temporal_blur"
+  },
+  {
+   "id": 25,
+   "type": "VAEDecode",
+   "pos": [
+    1660,
+    770
+   ],
+   "size": [
+    340,
+    84
+   ],
+   "flags": {},
+   "order": 22,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "samples",
+     "name": "samples",
+     "type": "LATENT",
+     "link": 36
+    },
+    {
+     "localized_name": "vae",
+     "name": "vae",
+     "type": "VAE",
+     "link": 37
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "IMAGE",
+     "name": "IMAGE",
+     "type": "IMAGE",
+     "links": [
+      38
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "VAEDecode"
+   },
+   "widgets_values": []
+  },
+  {
+   "id": 26,
+   "type": "SaveAnimatedWEBP",
+   "pos": [
+    2060,
+    744
+   ],
+   "size": [
+    340,
+    192
+   ],
+   "flags": {},
+   "order": 25,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "images",
+     "name": "images",
+     "type": "IMAGE",
+     "link": 38
+    }
+   ],
+   "outputs": [],
+   "properties": {
+    "Node name for S&R": "SaveAnimatedWEBP"
+   },
+   "widgets_values": [
+    "wan_bending/self_attention_temporal_blur",
+    16.0,
+    false,
+    90,
+    "default"
+   ],
+   "title": "Save: self_attention_temporal_blur"
+  },
+  {
+   "id": 27,
+   "type": "Note",
+   "pos": [
+    60,
+    -474
+   ],
+   "size": [
+    520,
+    454
+   ],
+   "flags": {},
+   "order": 26,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "properties": {},
+   "widgets_values": [
+    "Temporal bending: transforms that change over the frames.\n- Frame Ramp: the rotation of the cross-attention maps grows from 0 (first frame) to full (last frame).\n- Temporal Shift on the block outputs: content is pushed 2 latent frames (8 video frames) later in blocks 10-20 during the noisy first half of sampling.\n- Temporal Blur on the self-attention output: motion smears and lingers.\n\nWAN packs 4 video frames into one latent frame (the first frame alone).\n\nEXPERIMENTAL: the video bending nodes were validated on tiny random-weight WAN models only, not yet on real WAN weights. Please report what you see.\n\nModels (Comfy-Org repackaged, put them in ComfyUI/models/...):\n- diffusion_models: https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/tree/main/split_files/diffusion_models\n- text_encoders: umt5_xxl_fp8_e4m3fn_scaled.safetensors (same repo, split_files/text_encoders)\n- vae: wan_2.1_vae.safetensors (same repo, split_files/vae)\n"
+   ],
+   "color": "#432",
+   "bgcolor": "#653"
+  }
+ ],
+ "links": [
+  [
+   1,
+   1,
+   0,
+   4,
+   0,
+   "MODEL"
+  ],
+  [
+   2,
+   2,
+   0,
+   5,
+   0,
+   "CLIP"
+  ],
+  [
+   3,
+   2,
+   0,
+   6,
+   0,
+   "CLIP"
+  ],
+  [
+   4,
+   4,
+   0,
+   8,
+   0,
+   "MODEL"
+  ],
+  [
+   5,
+   5,
+   0,
+   8,
+   1,
+   "CONDITIONING"
+  ],
+  [
+   6,
+   6,
+   0,
+   8,
+   2,
+   "CONDITIONING"
+  ],
+  [
+   7,
+   7,
+   0,
+   8,
+   3,
+   "LATENT"
+  ],
+  [
+   8,
+   8,
+   0,
+   9,
+   0,
+   "LATENT"
+  ],
+  [
+   9,
+   3,
+   0,
+   9,
+   1,
+   "VAE"
+  ],
+  [
+   10,
+   9,
+   0,
+   10,
+   0,
+   "IMAGE"
+  ],
+  [
+   11,
+   11,
+   0,
+   12,
+   0,
+   "BENDING_MODULE"
+  ],
+  [
+   12,
+   4,
+   0,
+   13,
+   0,
+   "MODEL"
+  ],
+  [
+   13,
+   12,
+   0,
+   13,
+   1,
+   "BENDING_MODULE"
+  ],
+  [
+   14,
+   13,
+   0,
+   14,
+   0,
+   "MODEL"
+  ],
+  [
+   15,
+   5,
+   0,
+   14,
+   1,
+   "CONDITIONING"
+  ],
+  [
+   16,
+   6,
+   0,
+   14,
+   2,
+   "CONDITIONING"
+  ],
+  [
+   17,
+   7,
+   0,
+   14,
+   3,
+   "LATENT"
+  ],
+  [
+   18,
+   14,
+   0,
+   15,
+   0,
+   "LATENT"
+  ],
+  [
+   19,
+   3,
+   0,
+   15,
+   1,
+   "VAE"
+  ],
+  [
+   20,
+   15,
+   0,
+   16,
+   0,
+   "IMAGE"
+  ],
+  [
+   21,
+   4,
+   0,
+   18,
+   0,
+   "MODEL"
+  ],
+  [
+   22,
+   17,
+   0,
+   18,
+   1,
+   "BENDING_MODULE"
+  ],
+  [
+   23,
+   18,
+   0,
+   19,
+   0,
+   "MODEL"
+  ],
+  [
+   24,
+   5,
+   0,
+   19,
+   1,
+   "CONDITIONING"
+  ],
+  [
+   25,
+   6,
+   0,
+   19,
+   2,
+   "CONDITIONING"
+  ],
+  [
+   26,
+   7,
+   0,
+   19,
+   3,
+   "LATENT"
+  ],
+  [
+   27,
+   19,
+   0,
+   20,
+   0,
+   "LATENT"
+  ],
+  [
+   28,
+   3,
+   0,
+   20,
+   1,
+   "VAE"
+  ],
+  [
+   29,
+   20,
+   0,
+   21,
+   0,
+   "IMAGE"
+  ],
+  [
+   30,
+   4,
+   0,
+   23,
+   0,
+   "MODEL"
+  ],
+  [
+   31,
+   22,
+   0,
+   23,
+   1,
+   "BENDING_MODULE"
+  ],
+  [
+   32,
+   23,
+   0,
+   24,
+   0,
+   "MODEL"
+  ],
+  [
+   33,
+   5,
+   0,
+   24,
+   1,
+   "CONDITIONING"
+  ],
+  [
+   34,
+   6,
+   0,
+   24,
+   2,
+   "CONDITIONING"
+  ],
+  [
+   35,
+   7,
+   0,
+   24,
+   3,
+   "LATENT"
+  ],
+  [
+   36,
+   24,
+   0,
+   25,
+   0,
+   "LATENT"
+  ],
+  [
+   37,
+   3,
+   0,
+   25,
+   1,
+   "VAE"
+  ],
+  [
+   38,
+   25,
+   0,
+   26,
+   0,
+   "IMAGE"
+  ]
+ ],
+ "groups": [],
+ "config": {},
+ "extra": {
+  "ds": {
+   "scale": 0.6,
+   "offset": [
+    200,
+    400
+   ]
+  }
+ },
+ "version": 0.4
+}
