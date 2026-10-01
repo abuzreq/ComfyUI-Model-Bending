@@ -1,5 +1,18 @@
 // Image Manager Module
 
+/** Bends JSON format version written by "Copy Bends" (see docs/bends-json.md). */
+const BENDS_JSON_VERSION = 1.1;
+/** Optional per-bend keys of version 1.1. The UI has no controls for them, but keeps them on a bend. */
+const BEND_EXTRA_KEYS = ["steps", "t", "blend", "label", "guard", "inner"];
+
+function pickBendExtras(source) {
+  const extras = {};
+  if (source) BEND_EXTRA_KEYS.forEach((k) => {
+    if (source[k] !== undefined && source[k] !== null) extras[k] = source[k];
+  });
+  return extras;
+}
+
 class ImageManager {
   constructor() {
     this.bendingAngle = 0;
@@ -15,7 +28,8 @@ class ImageManager {
     this.imageCache = new Map();
     this.demoMode = "live"; // or "live"
     this.liveGenerationMode = "local"; // "local" or "remote"
-    /** @type {Map<string, {module_type: string, module_args: Object}>} path -> bend entry */
+    /** @type {Map<string, {module_type: string, module_args: Object, extras?: Object}>} path -> bend entry.
+     *  extras holds the optional version 1.1 keys (steps, t, blend, label, guard, inner). */
     this.bends = new Map();
     /** "live" | "on_demand" */
     this.queueMode = "live";
@@ -47,6 +61,7 @@ class ImageManager {
     if (btn) btn.addEventListener("click", () => {
       const bends = this.getBends();
       const selection = {
+        version: BENDS_JSON_VERSION,
         bends,
         steps_min: this.stepsMin,
         steps_max: this.stepsMax,
@@ -200,9 +215,10 @@ class ImageManager {
       const key = def?.module_args_key;
       const val = key ? entry.module_args?.[key] : undefined;
       const defVal = def?.defaultValue;
-      const isActive = val !== undefined && val !== defVal;
+      // Ops the UI has no slider for (e.g. fourier, subset) are always kept.
+      const isActive = !def || (val !== undefined && val !== defVal);
       if (isActive)
-        out.push({ path, module_type: entry.module_type, module_args: { ...entry.module_args } });
+        out.push({ path, module_type: entry.module_type, module_args: { ...entry.module_args }, ...(entry.extras || {}) });
     });
     return out;
   }
@@ -213,17 +229,21 @@ class ImageManager {
    */
   setBend(path, module_type, module_args) {
     if (!path) return;
+    // Keep the version 1.1 keys of the bend already at this path when a slider changes its value.
+    const extras = { ...(this.bends.get(path)?.extras || {}) };
     if (arguments.length === 2 && typeof module_type === "number") {
+      delete extras.inner;
       if (module_type === 0) this.bends.delete(path);
-      else this.bends.set(path, { module_type: "rotate", module_args: { angle_degrees: module_type } });
+      else this.bends.set(path, { module_type: "rotate", module_args: { angle_degrees: module_type }, extras });
       return;
     }
+    if (module_type !== "subset") delete extras.inner;
     const def = CONFIG.BENDING_TYPES?.[module_type];
     const key = def?.module_args_key;
     const val = key ? module_args?.[key] : undefined;
     const defVal = def?.defaultValue;
     if (val !== undefined && val !== defVal)
-      this.bends.set(path, { module_type, module_args: { ...module_args } });
+      this.bends.set(path, { module_type, module_args: { ...module_args }, extras });
     else
       this.bends.delete(path);
   }
@@ -233,10 +253,11 @@ class ImageManager {
     this.bends.clear();
     (entries || []).forEach((b) => {
       if (!b?.path) return;
-      if (b.module_type && b.module_args) {
-        this.bends.set(b.path, { module_type: b.module_type, module_args: { ...b.module_args } });
+      const extras = pickBendExtras(b);
+      if (b.module_type) {
+        this.bends.set(b.path, { module_type: b.module_type, module_args: { ...(b.module_args || {}) }, extras });
       } else if (typeof b.angle === "number" && b.angle !== 0) {
-        this.bends.set(b.path, { module_type: "rotate", module_args: { angle_degrees: b.angle } });
+        this.bends.set(b.path, { module_type: "rotate", module_args: { angle_degrees: b.angle }, extras });
       }
     });
   }

@@ -406,6 +406,46 @@ def clear_forward_hooks(module: nn.Module) -> None:
         clear_forward_hooks(child)
 
 
+_OPTIONAL_BEND_KEYS = ("steps", "t", "blend", "label", "guard", "inner")
+
+
+def normalize_bends(raw, problems: List[str]) -> List[Dict[str, Any]]:
+    """
+    Normalise a list of raw bend objects (from pasted JSON or from the web UI) to
+    { "path", "module_type", "module_args" } plus the optional version 1.1 keys, which are kept as given.
+    Shared by parse_bends_json and the /web_bend_demo/selection route so both accept the same format.
+    Bends that cannot be used are skipped and described in `problems`.
+    """
+    bends: List[Dict[str, Any]] = []
+    for i, b in enumerate(raw or []):
+        if not isinstance(b, dict):
+            problems.append(f"bend #{i} is not an object; skipped")
+            continue
+        path = b.get("path")
+        if not path or not isinstance(path, str):
+            problems.append(f"bend #{i} has no 'path'; skipped")
+            continue
+        where = f"bend #{i} ({path}): "
+        for key in b:
+            if key not in _BEND_KEYS:
+                problems.append(f"{where}unknown key {key!r} (ignored)")
+        if "angle" in b and isinstance(b.get("angle"), (int, float)):
+            module_type = "rotate"
+            module_args = _normalize_module_args({"angle_degrees": float(b["angle"])})
+        else:
+            module_type = (b.get("module_type") or "").strip()
+            if not module_type:
+                problems.append(f"{where}no module_type; defaulting to 'rotate'")
+                module_type = "rotate"
+            module_args = _normalize_module_args(b.get("module_args") or {})
+        bend = {"path": path, "module_type": module_type, "module_args": module_args}
+        for key in _OPTIONAL_BEND_KEYS:
+            if b.get(key) is not None:
+                bend[key] = b[key]
+        bends.append(bend)
+    return bends
+
+
 def parse_bends_json(json_str: str, problems: Optional[List[str]] = None) -> tuple:
     """
     Parse JSON from the web UI "Copy Bends" clipboard format.
@@ -446,33 +486,7 @@ def parse_bends_json(json_str: str, problems: Optional[List[str]] = None) -> tup
     if not isinstance(raw, list):
         problems.append("'bends' must be a list; no bends applied")
         raw = []
-    bends: List[Dict[str, Any]] = []
-    for i, b in enumerate(raw):
-        if not isinstance(b, dict):
-            problems.append(f"bend #{i} is not an object; skipped")
-            continue
-        path = b.get("path")
-        if not path or not isinstance(path, str):
-            problems.append(f"bend #{i} has no 'path'; skipped")
-            continue
-        where = f"bend #{i} ({path}): "
-        for key in b:
-            if key not in _BEND_KEYS:
-                problems.append(f"{where}unknown key {key!r} (ignored)")
-        if "angle" in b and isinstance(b.get("angle"), (int, float)):
-            module_type = "rotate"
-            module_args = _normalize_module_args({"angle_degrees": float(b["angle"])})
-        else:
-            module_type = (b.get("module_type") or "").strip()
-            if not module_type:
-                problems.append(f"{where}no module_type; defaulting to 'rotate'")
-                module_type = "rotate"
-            module_args = _normalize_module_args(b.get("module_args") or {})
-        bend = {"path": path, "module_type": module_type, "module_args": module_args}
-        for key in ("steps", "t", "blend", "label", "guard", "inner"):
-            if b.get(key) is not None:
-                bend[key] = b[key]
-        bends.append(bend)
+    bends = normalize_bends(raw, problems)
 
     steps_min = data.get("steps_min")
     steps_max = data.get("steps_max")
@@ -811,14 +825,13 @@ async def api_set_selection(request):
     if not session_id:
         return web.json_response({"ok": False, "error": "missing session_id"}, status=400)
 
+    # Same normalisation as pasted JSON, so the version 1.1 per-bend keys (steps, t, blend, guard, inner, label)
+    # survive a round trip through the web UI.
+    problems: List[str] = []
     raw = data.get("bends", []) or []
-    bends: List[Dict[str, Any]] = []
-    for b in raw:
-        path = b.get("path")
-        module_type = (b.get("module_type") or "").strip() or "rotate"
-        module_args = _normalize_module_args(b.get("module_args") or {})
-        if path and isinstance(path, str):
-            bends.append({"path": path, "module_type": module_type, "module_args": module_args})
+    bends = normalize_bends(raw if isinstance(raw, list) else [], problems)
+    for p in problems:
+        warn("web UI selection: %s", p)
 
     selected_part = data.get("selected_part")
     if selected_part is not None and not isinstance(selected_part, str):
@@ -856,7 +869,7 @@ async def api_set_selection(request):
     sel = SELECTION_BY_SESSION[session_id]
     steps_part = (getattr(sel, "steps_min", None), getattr(sel, "steps_max", None), getattr(sel, "max_denoising_steps", 200))
     change_hash = _bends_hash(sel.bends) + "|" + str(steps_part) + "|" + str(getattr(sel, "selected_part", None) or "")
-    return web.json_response({"ok": True, "change_hash": change_hash})
+    return web.json_response({"ok": True, "change_hash": change_hash, "warnings": problems})
 
 
 @PromptServer.instance.routes.post("/web_bend_demo/clear")

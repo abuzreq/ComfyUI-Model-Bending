@@ -510,6 +510,39 @@ def test_guards():
     assert torch.isinf(bendutils.blend_and_guard(x, torch.full_like(x, float("inf")), 1.0, guard={"nan": "none"})).all()
 
 
+def test_web_ui_selection_route_keeps_v11_keys():
+    """POST /web_bend_demo/selection -> Interactive Bending WebUI must honour per-bend 1.1 keys."""
+    import asyncio
+    import json
+
+    class Request:
+        def __init__(self, body=None, query=None):
+            self._body, self.rel_url = body, types.SimpleNamespace(query=query or {})
+
+        async def json(self):
+            return self._body
+
+    sent = [{"path": "middle_block.1", "module_type": "multiply", "module_args": {"scalar": 0}, "steps": "1",
+             "label": "only step 1", "guard": {"nan": "zero"}},
+            {"path": "output_blocks.*.1", "module_type": "subset", "module_args": {"percentage": 0.5, "dim": "channel"},
+             "inner": {"module_type": "multiply", "module_args": {"scalar": 2}}, "t": [1.0, 0.5], "blend": 0.5},
+            {"module_type": "multiply"}]
+    resp = asyncio.run(nodes.api_set_selection(Request({"session_id": "t1", "bends": sent})))
+    body = json.loads(resp.body)
+    assert body["ok"] and "bend #2 has no 'path'" in body["warnings"][0]
+    stored = json.loads(asyncio.run(nodes.api_get_selection(Request(query={"session_id": "t1"}))).body)["bends"]
+    assert stored == sent[:2]
+    # the stored selection is applied with its windows: only step 1 is bent by the first bend
+    asyncio.run(nodes.api_set_selection(Request({"session_id": "t2", "bends": sent[:1]})))
+    (m,) = nodes.InteractiveBendingWebUI().patch(UNET, session_id="t2")
+    outs = run(m, X, CTX)
+    assert same(outs[0], BASELINE[0]) and not same(outs[1], BASELINE[1]) and same(outs[2], BASELINE[2])
+    # a different window gives a different change hash, so ComfyUI re-executes the node
+    h1 = nodes.InteractiveBendingWebUI.IS_CHANGED(UNET, session_id="t2")
+    asyncio.run(nodes.api_set_selection(Request({"session_id": "t2", "bends": [{**sent[0], "steps": "2"}]})))
+    assert nodes.InteractiveBendingWebUI.IS_CHANGED(UNET, session_id="t2") != h1
+
+
 def test_json_node_placeholders_and_report():
     js = '{"bends": [{"path": "middle_block.1", "module_type": "multiply", "module_args": {"scalar": {{a}}}}]}'
     m, report, _ = nodes.ApplyBendsFromJSON().patch(UNET, js, a=0.0)

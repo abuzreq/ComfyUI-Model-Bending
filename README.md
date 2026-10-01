@@ -89,7 +89,7 @@ Workflows ([workflows/video/](workflows/video/), with model download links in ea
 Bending notes:
 - Paths to containers the model never calls directly (e.g. `middle_block`, `output_blocks.4`) are bent at their last child; lists (`input_blocks`) are skipped with a warning. All messages are logged with the `[model-bending]` prefix; set `strict` to turn them into errors.
 - `Model Bending` accepts a diffusion-time window (`t_start`/`t_end`), which follows the noise level regardless of steps, scheduler or shift.
-- The bends JSON (version 1.1) only adds optional keys to the web UI format, so v1 JSON works unchanged. Older plugin versions ignore the new keys (bending at all steps, without guards), log a warning for wildcard paths and reject `subset`; they never skip a bend silently. Per bend: `"t": [hi, lo]`, `"steps": "0-4,9"`, `"blend": 0..1`, `"label"`, `"guard": {"nan": "zero|clamp|none", "max_std_ratio": 8, "preserve_norm": true}`, and `"module_type": "subset"` with an `"inner"` op. Paths accept wildcards per segment (`output_blocks.*.1`, `input_blocks.[4-8].0`).
+- The bends JSON (version 1.1, documented in [docs/bends-json.md](docs/bends-json.md)) only adds optional keys to the web UI format, so v1 JSON works unchanged. Older plugin versions ignore the new keys (bending at all steps, without guards), log a warning for wildcard paths and reject `subset`; they never skip a bend silently. Per bend: `"t": [hi, lo]`, `"steps": "0-4,9"`, `"blend": 0..1`, `"label"`, `"guard": {"nan": "zero|clamp|none", "max_std_ratio": 8, "preserve_norm": true}`, and `"module_type": "subset"` with an `"inner"` op. Paths accept wildcards per segment (`output_blocks.*.1`, `input_blocks.[4-8].0`).
 - `Apply Bends from JSON` replaces `{{a}}`…`{{d}}` with its optional inputs, warns about unknown keys and arguments (e.g. a misspelled `scaler`), can clamp arguments (`hard`: each op's limits, `safe`: narrowed by a `safe_ranges` JSON, optionally per path glob), and outputs a `report` and a `resolved_json` with every layer and argument made explicit. Bends on the same layer apply last-to-first, as before.
 - See `workflows/activation_probe_steering.json` for the probe and steering nodes.
 
@@ -102,7 +102,7 @@ Bending notes:
 | **model_bending_nodes.py** | Standalone bending nodes (inspector, VAE bending, latent/conditioning ops). |
 | **bendutils.py** | Bending and graph utilities, including the shared hook engine. |
 | **probe.py** / **probe_nodes.py** | Activation probe and steering-vector core (reusable by the web UI) and its nodes. |
-| **tests/** | CPU tests with tiny random models: `python_embeded/python.exe ComfyUI/custom_nodes/ComfyUI-Model-Bending/tests/test_hooks.py` |
+| **tests/** | CPU tests with tiny random models: `python_embeded/python.exe ComfyUI/custom_nodes/ComfyUI-Model-Bending/tests/test_hooks.py`; web UI bend store: `node tests/test_web_bend_store.js` |
 
 ## Notes
 This is an ongoing project. Issues and feature requests are welcome (e.g. via GitHub issues as applicable).
