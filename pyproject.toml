@@ -14,7 +14,7 @@ bugs = "https://github.com/abuzreq/ComfyUI-Model-Bending/issues"
 [tool.comfy]
 PublisherId = "abuzreq"
 DisplayName = "ComfyUI Model Bending"
-Icon = ""
+Icon = "https://raw.githubusercontent.com/abuzreq/ComfyUI-Model-Bending/main/docs/icon.png"
 
 # Use strict defaults
 strict = true
