@@ -34,5 +34,15 @@ assert.strictEqual(im.getBend("middle_block.1"), null);
 // plain v1 bends are emitted exactly as before
 im.setBends([{ path: "a.b", module_type: "rotate", module_args: { angle_degrees: 90 } }]);
 assert.deepStrictEqual(plain(im.getBends()), [{ path: "a.b", module_type: "rotate", module_args: { angle_degrees: 90 } }]);
-assert.strictEqual(ctx.BENDS_JSON_VERSION, 1.1);
+// version 1.2: "kb" survives the store; a slider change drops it (the bend no longer matches its source)
+const kb = { dataset: "abuzreq/model-bending-knowledge-base", record: "e75fee762a99a75a3f82" };
+const kbBend = { path: "output_blocks.6.0", module_type: "multiply", module_args: { scalar: 0.7 }, t: [0.33, 0], label: "shrink", kb };
+im.setBends([kbBend]);
+assert.deepStrictEqual(plain(im.getBends()), [kbBend], "kb survives setBends -> getBends");
+im.setBend("output_blocks.6.0", "multiply", { scalar: 0.7 });
+assert.deepStrictEqual(plain(im.getBends()), [kbBend], "re-setting the same value keeps kb");
+im.setBend("output_blocks.6.0", "multiply", { scalar: 0.5 });
+assert.deepStrictEqual(plain(im.getBends()), [{ path: "output_blocks.6.0", module_type: "multiply", module_args: { scalar: 0.5 }, t: [0.33, 0], label: "shrink" }],
+  "a changed amount drops kb and keeps the other keys");
+assert.strictEqual(ctx.BENDS_JSON_VERSION, 1.2);
 console.log("web UI bend store: all checks passed");

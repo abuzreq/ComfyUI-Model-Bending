@@ -1,15 +1,16 @@
-# Bends JSON, version 1.1
+# Bends JSON, version 1.2
 
 This is the format the web UI copies with "Copy Bends", posts to `/web_bend_demo/selection`, and the
 `Apply Bends from JSON` node reads. Other tools that produce or consume bends should use it.
 
-Version 1.1 only adds optional keys to version 1, so every v1 document is a valid 1.1 document.
+Versions 1.1 and 1.2 only add optional keys to version 1, so every v1 document is a valid 1.2 document.
+Version 1.2 (plugin 0.3.1) adds the single metadata key `kb`.
 
 ## Example
 
 ```json
 {
-  "version": 1.1,
+  "version": 1.2,
   "selected_part": "diffusion_model",
   "steps_min": null,
   "steps_max": null,
@@ -22,7 +23,8 @@ Version 1.1 only adds optional keys to version 1, so every v1 document is a vali
       "t": [1.0, 0.5],
       "blend": 0.8,
       "label": "boost attention early",
-      "guard": {"nan": "zero", "max_std_ratio": 4}
+      "guard": {"nan": "zero", "max_std_ratio": 4},
+      "kb": {"dataset": "abuzreq/model-bending-knowledge-base", "record": "e75fee762a99a75a3f82"}
     },
     {
       "path": "middle_block.1",
@@ -43,7 +45,7 @@ Version 1.1 only adds optional keys to version 1, so every v1 document is a vali
 | `steps_min`, `steps_max` | int or null | Default step range for bends without their own `steps`. Either end may be omitted. |
 | `max_denoising_steps` | int | Upper bound used when a step range is open-ended. Default 200, clamped to 1–1000. |
 | `selected_part` | string | Module that paths are relative to. Default `diffusion_model`. |
-| `version` | number | Optional. A value above 1.1 produces a warning. |
+| `version` | number | Optional. A value above 1.2 produces a warning. |
 | `attention_bends` | list | *Experimental.* Attention-map bends for video DiTs (WAN); see [below](#attention_bends-experimental). |
 
 ## Per-bend keys
@@ -60,6 +62,7 @@ Version 1.1 only adds optional keys to version 1, so every v1 document is a vali
 | `label` | 1.1 | Free text, echoed in the node's report. |
 | `guard` | 1.1 | Safety options applied after the bend (see below). |
 | `inner` | 1.1 | The op wrapped by `module_type: "subset"` or `"frame_ramp"`: `{"module_type", "module_args"}`. |
+| `kb` | 1.2 | Where the bend came from in the bend knowledge base: `{"dataset", "record"}` or `{"dataset", "cell"}`. Not used to bend; kept in `resolved_json`. |
 
 ### `path`
 
@@ -84,6 +87,14 @@ Rough guide: 1–0.7 composition, 0.7–0.2 shapes and style, 0.2–0 detail.
 | `nan` | `"zero"` (default), `"clamp"`, `"none"` | `zero` replaces NaN and Inf with 0. `clamp` maps NaN to 0 and Inf to the largest finite value. `none` leaves them. |
 | `max_std_ratio` | number > 0 | Shrinks the result around its mean so its spread is at most that multiple of the unbent spread. |
 | `preserve_norm` | boolean | Rescales each channel to its unbent L2 norm, so the bend changes direction and not energy. |
+
+### `kb`
+
+An object. Known fields: `dataset` (string, e.g. `abuzreq/model-bending-knowledge-base`) and either `record`
+(a record id: hex, 8–40 characters) or `cell` (a cell key such as
+`sd1|out.mid|res_block|Conv2d|scale|shrink|late|txt2img`). The node only checks that `kb` is an object, so the
+knowledge base can add fields without a plugin release. A `kb` that is not an object is one warning and is
+dropped. It has no effect on the render.
 
 ## Ops
 
@@ -154,6 +165,8 @@ attention bend with its blocks and arguments made explicit.
   share this form when you need reproducibility.
 - **Warnings.** All messages are logged with the `[model-bending]` prefix. The node lists them in its `report`
   output, and `POST /web_bend_demo/selection` returns them as `warnings`.
+- **`kb`.** Keep it when you copy or re-save a bend. Drop it if you change the bend so that it no longer
+  matches its source (another path, op or amount).
 
 ## `Apply Bends from JSON` extras
 
@@ -175,15 +188,19 @@ These are node inputs, not part of the JSON:
 
 ## Compatibility
 
-| Reader | v1 document | 1.1 document |
-|---|---|---|
-| This version | Unchanged behaviour | Full support |
-| Older plugin versions | Supported | New keys are ignored, so windows, blend and guards do not apply. Wildcard paths are skipped with a warning. `subset`, `fourier` and the ops added in plugin 0.3 raise "Unknown module_type". `attention_bends` is ignored with a warning. |
+| Reader | v1 document | 1.1 document | 1.2 document |
+|---|---|---|---|
+| This version (0.3.1) | Unchanged behaviour | Full support | Full support |
+| Plugin 0.3.0 | Unchanged behaviour | Full support | `kb` is an unknown key: a warning, or an error with `strict`. Everything else applies. |
+| Older plugin versions | Supported | New keys are ignored, so windows, blend and guards do not apply. Wildcard paths are skipped with a warning. `subset`, `fourier` and the ops added in plugin 0.3 raise "Unknown module_type". `attention_bends` is ignored with a warning. | As for 1.1; `kb` is also ignored with a warning. |
+
+A tool that must work with 0.3.0 can remove `kb` from the text it gives the node and keep it in its own records.
 
 ## Limits to know
 
-- The web UI keeps the 1.1 keys of a bend it receives, and sends them back when you move that bend's slider,
-  but it has no controls to edit them. It writes three ops itself: `add_noise`, `multiply` and `rotate`.
+- The web UI keeps the 1.1 and 1.2 keys of a bend it receives, and sends them back when you move that bend's
+  slider, but it has no controls to edit them. Moving the slider drops `kb`, since the bend then differs from
+  its source. It writes three ops itself: `add_noise`, `multiply` and `rotate`.
 - The web UI stores one bend per layer path. `Apply Bends from JSON` accepts several.
 - `subset` with `percentage` 0 or 1 does nothing. On token (3-D) activations only `batch` and `channel` are meaningful.
 

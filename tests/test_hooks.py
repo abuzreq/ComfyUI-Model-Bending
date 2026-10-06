@@ -543,6 +543,41 @@ def test_web_ui_selection_route_keeps_v11_keys():
     assert nodes.InteractiveBendingWebUI.IS_CHANGED(UNET, session_id="t2") != h1
 
 
+def test_json_kb_key_is_kept_and_checked():
+    """Version 1.2: 'kb' is metadata from the bend knowledge base; accepted under strict, echoed, never applied."""
+    import asyncio
+    import json
+    kb = {"dataset": "abuzreq/model-bending-knowledge-base", "record": "e75fee762a99a75a3f82"}
+    bend = {"path": "middle_block.1", "module_type": "multiply", "module_args": {"scalar": 0}, "kb": kb}
+    m, report, resolved = nodes.ApplyBendsFromJSON().patch(UNET, _json([bend], version=1.2), strict=True)
+    assert "warnings" not in json.loads(report)
+    assert json.loads(resolved)["bends"][0]["kb"] == kb
+    assert not same(run(m, X, CTX)[0], BASELINE[0])
+    # a non-object kb is one warning; the bend still applies and kb is not echoed
+    m, report, resolved = nodes.ApplyBendsFromJSON().patch(UNET, _json([{**bend, "kb": "abc"}]))
+    warnings = json.loads(report)["warnings"]
+    assert len(warnings) == 1 and "'kb'" in warnings[0], warnings
+    assert "kb" not in json.loads(resolved)["bends"][0]
+    assert not same(run(m, X, CTX)[0], BASELINE[0])
+    # "version": 1.2 is this plugin's version, so no "newer" problem
+    problems = []
+    bends, *_ = nodes.parse_bends_json(_json([bend], version=1.2), problems)
+    assert problems == [] and bends[0]["kb"] == kb
+    # the web UI route keeps it too
+
+    class Request:
+        def __init__(self, body=None, query=None):
+            self._body, self.rel_url = body, types.SimpleNamespace(query=query or {})
+
+        async def json(self):
+            return self._body
+
+    resp = json.loads(asyncio.run(nodes.api_set_selection(Request({"session_id": "kb1", "bends": [bend]}))).body)
+    assert resp["ok"] and not resp.get("warnings")
+    stored = json.loads(asyncio.run(nodes.api_get_selection(Request(query={"session_id": "kb1"}))).body)["bends"]
+    assert stored == [bend]
+
+
 def test_json_node_placeholders_and_report():
     js = '{"bends": [{"path": "middle_block.1", "module_type": "multiply", "module_args": {"scalar": {{a}}}}]}'
     m, report, _ = nodes.ApplyBendsFromJSON().patch(UNET, js, a=0.0)

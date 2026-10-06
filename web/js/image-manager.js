@@ -1,9 +1,16 @@
 // Image Manager Module
 
 /** Bends JSON format version written by "Copy Bends" (see docs/bends-json.md). */
-const BENDS_JSON_VERSION = 1.1;
-/** Optional per-bend keys of version 1.1. The UI has no controls for them, but keeps them on a bend. */
-const BEND_EXTRA_KEYS = ["steps", "t", "blend", "label", "guard", "inner"];
+const BENDS_JSON_VERSION = 1.2;
+/** Optional per-bend keys of versions 1.1 and 1.2. The UI has no controls for them, but keeps them on a bend.
+ *  "kb" (1.2) says where a bend came from in the bend knowledge base; it is dropped when a slider changes the bend. */
+const BEND_EXTRA_KEYS = ["steps", "t", "blend", "label", "guard", "inner", "kb"];
+
+/** True when two module_args objects hold the same values (key order does not matter). */
+function sameModuleArgs(a, b) {
+  const ka = Object.keys(a || {}).sort(), kb = Object.keys(b || {}).sort();
+  return ka.length === kb.length && ka.every((k, i) => k === kb[i] && Object.is((a || {})[k], (b || {})[k]));
+}
 
 function pickBendExtras(source) {
   const extras = {};
@@ -29,7 +36,7 @@ class ImageManager {
     this.demoMode = "live"; // or "live"
     this.liveGenerationMode = "local"; // "local" or "remote"
     /** @type {Map<string, {module_type: string, module_args: Object, extras?: Object}>} path -> bend entry.
-     *  extras holds the optional version 1.1 keys (steps, t, blend, label, guard, inner). */
+     *  extras holds the optional version 1.1 / 1.2 keys (steps, t, blend, label, guard, inner, kb). */
     this.bends = new Map();
     /** "live" | "on_demand" */
     this.queueMode = "live";
@@ -230,14 +237,21 @@ class ImageManager {
   setBend(path, module_type, module_args) {
     if (!path) return;
     // Keep the version 1.1 keys of the bend already at this path when a slider changes its value.
-    const extras = { ...(this.bends.get(path)?.extras || {}) };
+    const prev = this.bends.get(path);
+    const extras = { ...(prev?.extras || {}) };
+    // "kb" links the bend to its knowledge-base source; a changed op or amount no longer matches it.
+    const dropKbIfChanged = (type, args) => {
+      if (prev && (prev.module_type !== type || !sameModuleArgs(prev.module_args, args))) delete extras.kb;
+    };
     if (arguments.length === 2 && typeof module_type === "number") {
       delete extras.inner;
+      dropKbIfChanged("rotate", { angle_degrees: module_type });
       if (module_type === 0) this.bends.delete(path);
       else this.bends.set(path, { module_type: "rotate", module_args: { angle_degrees: module_type }, extras });
       return;
     }
     if (module_type !== "subset") delete extras.inner;
+    dropKbIfChanged(module_type, module_args);
     const def = CONFIG.BENDING_TYPES?.[module_type];
     const key = def?.module_args_key;
     const val = key ? module_args?.[key] : undefined;

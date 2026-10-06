@@ -76,7 +76,7 @@ Bending notes:
 - Paths to containers the model never calls directly (e.g. `middle_block`, `output_blocks.4`) are bent at their last child; lists (`input_blocks`) are skipped with a warning. All messages are logged with the `[model-bending]` prefix; set `strict` to turn them into errors.
 - `Model Bending` accepts a diffusion-time window (`t_start`/`t_end`), which follows the noise level regardless of steps, scheduler or shift.
 - Rotate, Scale and Translate have a `padding` option: `zeros`, `border` (repeat the edge) or `reflection`.
-- The bends JSON (version 1.1, documented in [docs/bends-json.md](docs/bends-json.md)) only adds optional keys to the web UI format, so v1 JSON works unchanged. Older plugin versions ignore the new keys (bending at all steps, without guards), log a warning for wildcard paths and reject the newer ops; they never skip a bend silently. Per bend: `"t": [hi, lo]`, `"steps": "0-4,9"`, `"blend": 0..1`, `"label"`, `"guard": {"nan": "zero|clamp|none", "max_std_ratio": 8, "preserve_norm": true}`, and `"module_type": "subset"` or `"frame_ramp"` with an `"inner"` op. Paths accept wildcards per segment (`output_blocks.*.1`, `input_blocks.[4-8].0`).
+- The bends JSON (version 1.2, documented in [docs/bends-json.md](docs/bends-json.md)) only adds optional keys to the web UI format, so v1 JSON works unchanged. Since 0.3.1 a bend may carry `"kb"`, which records where it came from in the bend knowledge base; it is kept in `resolved_json` and never used to bend. Older plugin versions ignore the new keys (bending at all steps, without guards), log a warning for wildcard paths and reject the newer ops; they never skip a bend silently. Per bend: `"t": [hi, lo]`, `"steps": "0-4,9"`, `"blend": 0..1`, `"label"`, `"guard": {"nan": "zero|clamp|none", "max_std_ratio": 8, "preserve_norm": true}`, and `"module_type": "subset"` or `"frame_ramp"` with an `"inner"` op. Paths accept wildcards per segment (`output_blocks.*.1`, `input_blocks.[4-8].0`).
 - `Apply Bends from JSON` replaces `{{a}}`…`{{d}}` with its optional inputs, warns about unknown keys and arguments (e.g. a misspelled `scaler`), can clamp arguments (`hard`: each op's limits, `safe`: narrowed by a `safe_ranges` JSON, optionally per path glob), and outputs a `report` and a `resolved_json` with every layer and argument made explicit. Bends on the same layer apply last-to-first.
 
 ## Experimental: video model bending (WAN 2.1 / 2.2)
@@ -106,6 +106,7 @@ Most nodes work with any model, because bending only needs a path to a layer, an
 | **scripts/** | Experiment runners, export, metrics, and explorer. See [scripts/README.md](scripts/README.md). |
 | **workflows/** | Example workflows; video workflows in **workflows/video/**. |
 | **docs/** | [Bends JSON format](docs/bends-json.md) and images. |
+| **CHANGELOG.md** | What changed in each release. |
 | **nodes.py** | Web UI and JSON nodes (`InteractiveBendingWebUI`, `ApplyBendsFromJSON`) and the bends JSON reader. |
 | **model_bending_nodes.py** | Standalone bending nodes (model / block / VAE / LoRA bending, inspectors, latent and conditioning ops). |
 | **bending_modules.py** | The bending operations (rotate, scale, translate, blur, temporal ops, …). |

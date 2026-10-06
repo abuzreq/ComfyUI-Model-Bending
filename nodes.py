@@ -81,12 +81,13 @@ SELECTION_BY_SESSION: Dict[str, BendSelection] = {}
 # ----------------------------
 # Bend ops for the JSON format
 # ----------------------------
-# Version 1.1 only adds optional keys to v1, so older plugin versions still apply the bends (less precisely)
-# instead of skipping them, and v1 JSON keeps working unchanged.
-BENDS_JSON_VERSION = 1.1
+# Versions 1.1 and 1.2 only add optional keys to v1, so older plugin versions still apply the bends (less
+# precisely) instead of skipping them, and v1 JSON keeps working unchanged. 1.2 adds the metadata key "kb".
+BENDS_JSON_VERSION = 1.2
 _TOP_KEYS = {"bends", "bend", "steps_min", "steps_max", "max_denoising_steps", "selected_part", "version",
              "attention_bends"}
-_BEND_KEYS = {"path", "module_type", "module_args", "angle", "steps", "t", "blend", "label", "guard", "inner"}
+_BEND_KEYS = {"path", "module_type", "module_args", "angle", "steps", "t", "blend", "label", "guard", "inner",
+              "kb"}
 
 # name -> (factory, {arg: (type, default, hard limits)}). Hard limits mirror the matching module nodes'
 # widget ranges and are what clamp="hard" enforces; for str args they are the allowed choices.
@@ -406,13 +407,14 @@ def clear_forward_hooks(module: nn.Module) -> None:
         clear_forward_hooks(child)
 
 
-_OPTIONAL_BEND_KEYS = ("steps", "t", "blend", "label", "guard", "inner")
+_OPTIONAL_BEND_KEYS = ("steps", "t", "blend", "label", "guard", "inner", "kb")
 
 
 def normalize_bends(raw, problems: List[str]) -> List[Dict[str, Any]]:
     """
     Normalise a list of raw bend objects (from pasted JSON or from the web UI) to
-    { "path", "module_type", "module_args" } plus the optional version 1.1 keys, which are kept as given.
+    { "path", "module_type", "module_args" } plus the optional version 1.1 / 1.2 keys, which are kept as given.
+    "kb" (1.2) is metadata only; it must be an object, otherwise it is dropped with a problem.
     Shared by parse_bends_json and the /web_bend_demo/selection route so both accept the same format.
     Bends that cannot be used are skipped and described in `problems`.
     """
@@ -440,8 +442,12 @@ def normalize_bends(raw, problems: List[str]) -> List[Dict[str, Any]]:
             module_args = _normalize_module_args(b.get("module_args") or {})
         bend = {"path": path, "module_type": module_type, "module_args": module_args}
         for key in _OPTIONAL_BEND_KEYS:
-            if b.get(key) is not None:
-                bend[key] = b[key]
+            if b.get(key) is None:
+                continue
+            if key == "kb" and not isinstance(b[key], dict):
+                problems.append(f"{where}'kb' should be an object like {{\"dataset\", \"record\"}} (ignored)")
+                continue
+            bend[key] = b[key]
         bends.append(bend)
     return bends
 
@@ -456,6 +462,8 @@ def parse_bends_json(json_str: str, problems: Optional[List[str]] = None) -> tup
     Optional per-bend fields (version 1.1): "steps" (e.g. "0-4,9" or "3-"), "t" ([hi, lo] normalised diffusion
     time, 1 = pure noise), "blend" (0..1), "label", "guard" ({"nan", "max_std_ratio", "preserve_norm"}),
     "inner" (the op wrapped by module_type "subset"). "path" may use wildcards ("output_blocks.*.1").
+    Version 1.2 adds "kb": where the bend came from in the bend knowledge base ({"dataset", "record"} or
+    {"dataset", "cell"}); it is kept as metadata and never used to bend.
     Structural problems (unknown keys, bends without a path, ...) are appended to `problems`, or logged when
     no list is given. Raises ValueError on invalid JSON.
     """
@@ -567,7 +575,7 @@ def apply_bends_to_model(model, bends: List[Dict[str, Any]], steps_min: Optional
     """
     Apply a list of bends to a model and return the patched model.
     bends: list of { "path", "module_type", "module_args", optional "steps", "t", "blend", "label", "guard",
-    "inner" } (see parse_bends_json). Paths are relative to selected_part (default: diffusion_model), as shown
+    "inner", "kb" } (see parse_bends_json). "kb" is echoed into `resolved` and otherwise ignored. Paths are relative to selected_part (default: diffusion_model), as shown
     by the web UI, and may contain wildcards.
     steps_min/steps_max give the default step range; either end may be omitted.
     clamp: "none" | "hard" | "safe" (see _clamp_op). Problems found are logged and listed in report["warnings"];
@@ -645,7 +653,7 @@ def apply_bends_to_model(model, bends: List[Dict[str, Any]], steps_min: Optional
                                   blend=blend, label=b.get("label"), guard=guard))
             if resolved is not None:
                 entry = {"path": hooked, **final}
-                for key in ("steps", "t", "label"):
+                for key in ("steps", "t", "label", "kb"):
                     if b.get(key) is not None:
                         entry[key] = b[key]
                 if blend != 1.0:
