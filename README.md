@@ -3,7 +3,9 @@
 A ComfyUI custom node pack for **model bending** of diffusion models (Stable Diffusion, SDXL, Flux, SD3, and experimentally WAN video models). Model bending manipulates a model's activations at chosen places while it samples. It is a low-level kind of control, useful for creating experimental variations of an output, and for testing, breaking, tinkering with, or explaining models. Manipulations include addition, multiplication, noise, rotation, scaling, translation, flipping, blurring, sharpening, erosion, dilation, and more. Inspired by [network-bending](https://github.com/terrybroad/network-bending) of GAN models.
 
 ## Showcase
-A demo with pre-computed bending results and explanations: [https://diffusion-bending-demo.netlify.app/](https://diffusion-bending-demo.netlify.app/)
+A gallery of over 17k examples: [https://huggingface.co/spaces/abuzreq/model-bending-navigator](https://huggingface.co/spaces/abuzreq/model-bending-navigator)
+
+A interactive demo with pre-computed bending results and explanations: [https://diffusion-bending-demo.netlify.app/](https://diffusion-bending-demo.netlify.app/)
 
 Rotating the outputs of the realisticvisionv51_v51vae model at its UNet's middle block (`middle_block.2.out_layers`), through a full rotation (0–360°):
 
